@@ -1,7 +1,6 @@
-
 'use client'
 
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { User, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 
@@ -10,14 +9,115 @@ type SysPermissions = {
     can_edit_approved: boolean
 }
 
+export const DEFAULT_ROLE_VIEWS: Record<string, string[]> = {
+    SUPER_ADMIN: [
+        '/dashboard',
+        '/dashboard/nomina',
+        '/dashboard/semana',
+        '/dashboard/catalogos/cuadrillas',
+        '/dashboard/catalogos/empleados',
+        '/dashboard/operacion/reportes-diarios',
+        '/dashboard/chat',
+        '/dashboard/catalogos',
+        '/dashboard/configuracion',
+        '/dashboard/configuracion/usuarios',
+        '/dashboard/configuracion/visiones',
+    ],
+    DIRECTOR_OPERATIVO: [
+        '/dashboard',
+        '/dashboard/nomina',
+        '/dashboard/semana',
+        '/dashboard/catalogos/cuadrillas',
+        '/dashboard/operacion/reportes-diarios',
+        '/dashboard/chat',
+    ],
+    GERENTE: [
+        '/dashboard',
+        '/dashboard/nomina',
+        '/dashboard/semana',
+        '/dashboard/catalogos/cuadrillas',
+        '/dashboard/catalogos/empleados',
+        '/dashboard/operacion/reportes-diarios',
+        '/dashboard/chat',
+        '/dashboard/catalogos',
+    ],
+    SUPERINTENDENTE: [
+        '/dashboard',
+        '/dashboard/semana',
+        '/dashboard/catalogos/cuadrillas',
+        '/dashboard/catalogos/empleados',
+        '/dashboard/operacion/reportes-diarios',
+        '/dashboard/chat',
+        '/dashboard/catalogos',
+    ],
+    JEFE_PLANEACION: [
+        '/dashboard/semana',
+        '/dashboard/catalogos/ubicaciones',
+        '/dashboard/catalogos/productos-mina',
+        '/dashboard/catalogos/cuadrillas',
+        '/dashboard/operacion/reportes-diarios',
+        '/dashboard/chat',
+    ],
+    SUPERVISOR: [
+        '/dashboard/catalogos/cuadrillas',
+        '/dashboard/operacion/reportes-diarios',
+        '/dashboard/chat',
+    ],
+}
+
+export function checkPathAllowed(
+    pathname: string,
+    sysRole: string | null,
+    allowedViews: string[] | null
+): boolean {
+    if (!sysRole || sysRole === 'GUEST') return false
+    if (sysRole === 'SUPER_ADMIN') return true
+
+    const cleanPath = (pathname || '').split('?')[0]
+    if (cleanPath === '/dashboard/profile') return true
+
+    const effectiveViews =
+        Array.isArray(allowedViews) && allowedViews.length > 0
+            ? allowedViews
+            : DEFAULT_ROLE_VIEWS[sysRole] || []
+
+    return effectiveViews.some((av) => {
+        if (cleanPath === av) return true
+        if (av !== '/dashboard' && cleanPath.startsWith(av + '/')) return true
+        return false
+    })
+}
+
+export function resolveFirstAllowedPath(
+    sysRole: string | null,
+    allowedViews: string[] | null
+): string {
+    if (sysRole === 'SUPER_ADMIN') return '/dashboard'
+    const effectiveViews =
+        Array.isArray(allowedViews) && allowedViews.length > 0
+            ? allowedViews
+            : sysRole
+            ? DEFAULT_ROLE_VIEWS[sysRole] || []
+            : []
+
+    if (effectiveViews.length > 0) {
+        return effectiveViews[0]
+    }
+    return '/dashboard/operacion/reportes-diarios'
+}
+
 interface AuthContextType {
     user: User | null
     session: Session | null
     sysRole: string | null
     sysUserId: string | null
+    fullName: string | null
     permissions: SysPermissions | null
-    allowedViews: string[] | null // New field for dynamic views
+    allowedViews: string[] | null
     loading: boolean
+    isViewAllowed: (path: string) => boolean
+    getFirstAllowedPath: () => string
+    refreshUserConfig: () => Promise<void>
     signInWithGoogle: () => Promise<void>
     signInWithPassword: (email: string, password: string) => Promise<{ error?: string }>
     signInWithOtp: (email: string) => Promise<{ error?: string }>
@@ -32,189 +132,239 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [session, setSession] = useState<Session | null>(null)
     const [sysRole, setSysRole] = useState<string | null>(null)
     const [sysUserId, setSysUserId] = useState<string | null>(null)
+    const [fullName, setFullName] = useState<string | null>(null)
     const [permissions, setPermissions] = useState<SysPermissions | null>(null)
     const [allowedViews, setAllowedViews] = useState<string[] | null>(null)
     const [loading, setLoading] = useState(true)
 
-    const fetchUserConfig = async (email: string) => {
-        try {
-            // First attempt to fetch the user with all potential columns
-            const { data: sysUser, error: errU } = await supabase
-                .from('sys_users')
-                .select('id, role, views_json')
-                .ilike('email', email)
-                .eq('active', true)
-                .single()
-
-            console.log('[Auth Debug] fetchUserConfig response:', { sysUser, errU });
-
-            let finalUser: any = sysUser
-            let isLegacy = false
-
-            // If it fails because of missing column, retry without views_json
-            if (errU && errU.message.includes('views_json')) {
-                const { data: retryUser } = await supabase
-                    .from('sys_users')
-                    .select('id, role')
-                    .ilike('email', email)
-                    .eq('active', true)
-                    .single()
-
-                finalUser = retryUser
-                isLegacy = true
-            }
-
-            if (finalUser) {
-                setSysRole(finalUser.role)
-                setSysUserId(finalUser.id)
-
-                // If isLegacy is true, we show all (fallback). 
-                // BUT if isLegacy is false and views_json is null/empty, we should strictly follow that.
-                // For non-SUPER_ADMIN, null views_json will now be treated as [] (no views allowed)
-                const views = isLegacy ? null : (finalUser.views_json || [])
-                setAllowedViews(views)
-
-                const { data: roleCfg } = await supabase.from('sys_roles_config').select('*').eq('role', finalUser.role).single()
-                if (roleCfg) {
-                    setPermissions({
-                        can_approve_reports: roleCfg.can_approve_reports,
-                        can_edit_approved: roleCfg.can_edit_approved
-                    })
-                }
-            } else {
-                setSysRole('GUEST')
-                setSysUserId(null)
-                setAllowedViews(null)
-                setPermissions({ can_approve_reports: false, can_edit_approved: false })
-            }
-        } catch (error) {
-            console.error("Error loading permissions", error)
+    const clearSessionStorage = () => {
+        if (typeof window !== 'undefined') {
+            localStorage.removeItem('manual_user')
+            localStorage.removeItem('demo_mode')
+            localStorage.removeItem('demo_role')
         }
     }
 
-    useEffect(() => {
-        // Check demo mode first
-        const isDemo = typeof window !== 'undefined' && localStorage.getItem('demo_mode') === 'true'
-        if (isDemo) {
-            const demoRole = localStorage.getItem('demo_role') || 'SUPER_ADMIN'
-            let demoEmail = 'jesus12398@gmail.com'
-            if (demoRole === 'DIRECTOR_OPERATIVO') demoEmail = 'director@rayamina.com'
-            else if (demoRole === 'GERENTE') demoEmail = 'gerente@rayamina.com'
-            else if (demoRole === 'SUPERINTENDENTE') demoEmail = 'superintendente@rayamina.com'
-            else if (demoRole === 'JEFE_PLANEACION') demoEmail = 'kikus_100@hotmail.com'
-            else if (demoRole === 'SUPERVISOR') demoEmail = 'jesus@gmail.com'
+    const fetchUserConfig = useCallback(async (email: string): Promise<boolean> => {
+        try {
+            const cleanEmail = email.trim().toLowerCase()
+            const { data: sysUser, error: errU } = await supabase
+                .from('sys_users')
+                .select('id, email, full_name, nickname, role, views_json, active')
+                .ilike('email', cleanEmail)
+                .eq('active', true)
+                .maybeSingle()
 
-            const demoUser = {
-                id: 'demo-user-123',
-                app_metadata: {},
-                user_metadata: {},
-                aud: 'authenticated',
-                created_at: new Date().toISOString(),
-                email: demoEmail,
-                role: 'authenticated'
-            } as User
-            setUser(demoUser)
-            fetchUserConfig(demoEmail).then(() => setLoading(false))
-            return
-        }
+            let finalUser: any = sysUser
 
-        // Check manual login
-        const manual = typeof window !== 'undefined' ? localStorage.getItem('manual_user') : null
-        if (manual) {
-            const { email, password } = JSON.parse(manual)
-            signInWithPassword(email, password).then(() => setLoading(false))
-            return
-        }
-
-        // Check initial session
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            setSession(session)
-            const u = session?.user ?? null
-            setUser(u)
-            if (u?.email) {
-                fetchUserConfig(u.email).then(() => setLoading(false))
-            } else {
-                setLoading(false)
+            if (errU && errU.message.includes('views_json')) {
+                const { data: retryUser } = await supabase
+                    .from('sys_users')
+                    .select('id, email, full_name, nickname, role, active')
+                    .ilike('email', cleanEmail)
+                    .eq('active', true)
+                    .maybeSingle()
+                finalUser = retryUser
             }
-        }).catch((err) => {
-            console.error("Auth initialization error:", err)
-            setLoading(false)
-        })
 
-        // Listen for changes
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (localStorage.getItem('demo_mode') === 'true') return
-            setSession(session)
-            const u = session?.user ?? null
-            setUser(u)
-            if (u?.email) {
-                fetchUserConfig(u.email).then(() => setLoading(false))
+            if (finalUser && finalUser.active !== false) {
+                setSysRole(finalUser.role)
+                setSysUserId(finalUser.id)
+                setFullName(finalUser.full_name || finalUser.nickname || finalUser.email)
+
+                const configuredViews =
+                    Array.isArray(finalUser.views_json) && finalUser.views_json.length > 0
+                        ? finalUser.views_json
+                        : DEFAULT_ROLE_VIEWS[finalUser.role] || []
+
+                setAllowedViews(configuredViews)
+
+                const { data: roleCfg } = await supabase
+                    .from('sys_roles_config')
+                    .select('*')
+                    .eq('role', finalUser.role)
+                    .maybeSingle()
+
+                if (roleCfg) {
+                    setPermissions({
+                        can_approve_reports: Boolean(roleCfg.can_approve_reports),
+                        can_edit_approved: Boolean(roleCfg.can_edit_approved),
+                    })
+                } else {
+                    setPermissions({
+                        can_approve_reports: ['SUPER_ADMIN', 'DIRECTOR_OPERATIVO', 'GERENTE', 'SUPERINTENDENTE'].includes(finalUser.role),
+                        can_edit_approved: ['SUPER_ADMIN', 'DIRECTOR_OPERATIVO', 'GERENTE'].includes(finalUser.role),
+                    })
+                }
+                return true
             } else {
                 setSysRole(null)
                 setSysUserId(null)
-                setPermissions(null)
+                setFullName(null)
                 setAllowedViews(null)
+                setPermissions({ can_approve_reports: false, can_edit_approved: false })
+                return false
+            }
+        } catch (error) {
+            console.error('Error loading user security config:', error)
+            return false
+        }
+    }, [])
+
+    useEffect(() => {
+        // Limpiar cualquier rastro antiguo de modo demo no autorizado
+        if (typeof window !== 'undefined') {
+            localStorage.removeItem('demo_mode')
+            localStorage.removeItem('demo_role')
+        }
+
+        const initAuth = async () => {
+            try {
+                const manual = typeof window !== 'undefined' ? localStorage.getItem('manual_user') : null
+                if (manual) {
+                    const parsed = JSON.parse(manual)
+                    if (parsed?.email && parsed?.password) {
+                        const res = await signInWithPassword(parsed.email, parsed.password)
+                        if (res.error) {
+                            clearSessionStorage()
+                            setUser(null)
+                        }
+                        setLoading(false)
+                        return
+                    }
+                }
+
+                const { data: { session: supaSession } } = await supabase.auth.getSession()
+                setSession(supaSession)
+                const u = supaSession?.user ?? null
+                if (u?.email) {
+                    const valid = await fetchUserConfig(u.email)
+                    if (valid) {
+                        setUser(u)
+                    } else {
+                        await supabase.auth.signOut()
+                        setUser(null)
+                    }
+                } else {
+                    setUser(null)
+                }
+            } catch (err) {
+                console.error('Auth initialization error:', err)
+                setUser(null)
+            } finally {
                 setLoading(false)
             }
+        }
+
+        initAuth()
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, supaSession) => {
+            if (typeof window !== 'undefined' && localStorage.getItem('manual_user')) return
+            setSession(supaSession)
+            const u = supaSession?.user ?? null
+            if (u?.email) {
+                const valid = await fetchUserConfig(u.email)
+                if (valid) {
+                    setUser(u)
+                } else {
+                    setUser(null)
+                }
+            } else {
+                setUser(null)
+                setSysRole(null)
+                setSysUserId(null)
+                setFullName(null)
+                setPermissions(null)
+                setAllowedViews(null)
+            }
+            setLoading(false)
         })
 
         return () => subscription.unsubscribe()
-    }, [])
+    }, [fetchUserConfig])
+
+    const refreshUserConfig = async () => {
+        if (user?.email) {
+            const valid = await fetchUserConfig(user.email)
+            if (!valid) {
+                await signOut()
+            }
+        }
+    }
 
     const signInWithGoogle = async () => {
         await supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
-                redirectTo: `${window.location.origin}/dashboard`
-            }
+                redirectTo: `${window.location.origin}/dashboard`,
+            },
         })
     }
 
     const signInWithPassword = async (email: string, password: string) => {
+        const cleanEmail = email.trim().toLowerCase()
         try {
             const { data, error } = await supabase
                 .from('sys_users')
                 .select('*')
-                .ilike('email', email)
+                .ilike('email', cleanEmail)
                 .eq('auth_password', password)
                 .eq('active', true)
-                .single()
+                .maybeSingle()
 
             if (error || !data) {
-                return { error: 'Credenciales inválidas o usuario inactivo' }
+                return { error: 'Acceso denegado: correo o contraseña inválidos, o usuario desactivado en el sistema.' }
             }
 
-            // Create a mock user/session
-            const mockUser = {
+            const authenticatedUser = {
                 id: data.id,
                 email: data.email,
                 role: 'authenticated',
                 app_metadata: {},
-                user_metadata: {},
+                user_metadata: {
+                    full_name: data.full_name || data.nickname || data.email,
+                },
                 aud: 'authenticated',
-                created_at: new Date().toISOString()
+                created_at: new Date().toISOString(),
             } as User
 
-            // Persist manual login
-            localStorage.setItem('manual_user', JSON.stringify({ email: data.email, password: data.auth_password }))
+            if (typeof window !== 'undefined') {
+                localStorage.setItem(
+                    'manual_user',
+                    JSON.stringify({ email: data.email, password: data.auth_password })
+                )
+            }
 
-            setSession(null) // No real Supabase session
-            setUser(mockUser)
+            setSession(null)
+            setUser(authenticatedUser)
             await fetchUserConfig(data.email)
 
             return {}
         } catch (err: any) {
-            return { error: err.message }
+            return { error: err.message || 'Error al verificar credenciales.' }
         }
     }
 
     const signInWithOtp = async (email: string) => {
+        const cleanEmail = email.trim().toLowerCase()
         try {
+            // Verificar primero que el correo exista y esté activo en sys_users
+            const { data: existingUser } = await supabase
+                .from('sys_users')
+                .select('id, active')
+                .ilike('email', cleanEmail)
+                .eq('active', true)
+                .maybeSingle()
+
+            if (!existingUser) {
+                return { error: 'Este correo no está registrado como usuario autorizado en LA RAYA.' }
+            }
+
             const { error } = await supabase.auth.signInWithOtp({
-                email,
+                email: cleanEmail,
                 options: {
-                    emailRedirectTo: `${window.location.origin}/dashboard`
-                }
+                    emailRedirectTo: `${window.location.origin}/dashboard`,
+                },
             })
             if (error) return { error: error.message }
             return {}
@@ -224,46 +374,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const signOut = async () => {
-        localStorage.removeItem('manual_user')
-        localStorage.removeItem('demo_mode')
-        localStorage.removeItem('demo_role')
-        await supabase.auth.signOut()
+        clearSessionStorage()
+        try {
+            await supabase.auth.signOut()
+        } catch {}
         setUser(null)
         setSession(null)
         setSysRole(null)
         setSysUserId(null)
+        setFullName(null)
         setAllowedViews(null)
-        window.location.href = '/login'
+        if (typeof window !== 'undefined') {
+            window.location.href = '/login'
+        }
     }
 
-    const loginAsDemo = async (role: string = 'SUPER_ADMIN') => {
-        localStorage.setItem('demo_mode', 'true')
-        localStorage.setItem('demo_role', role)
-        let demoEmail = 'jesus12398@gmail.com'
-        if (role === 'DIRECTOR_OPERATIVO') demoEmail = 'director@rayamina.com'
-        else if (role === 'GERENTE') demoEmail = 'gerente@rayamina.com'
-        else if (role === 'SUPERINTENDENTE') demoEmail = 'superintendente@rayamina.com'
-        else if (role === 'JEFE_PLANEACION') demoEmail = 'kikus_100@hotmail.com'
-        else if (role === 'SUPERVISOR') demoEmail = 'jesus@gmail.com'
-
-        const demoUser = {
-            id: 'demo-user-123',
-            app_metadata: {},
-            user_metadata: {},
-            aud: 'authenticated',
-            created_at: new Date().toISOString(),
-            email: demoEmail,
-            role: 'authenticated'
-        } as User
-        setUser(demoUser)
-        await fetchUserConfig(demoEmail)
+    // Deshabilitado por seguridad: no se permite cambio de rol ni acceso demo sin autenticación real
+    const loginAsDemo = async () => {
+        console.warn('Acceso demo deshabilitado por políticas de seguridad corporativa.')
     }
+
+    const isViewAllowed = useCallback(
+        (path: string) => checkPathAllowed(path, sysRole, allowedViews),
+        [sysRole, allowedViews]
+    )
+
+    const getFirstAllowedPath = useCallback(
+        () => resolveFirstAllowedPath(sysRole, allowedViews),
+        [sysRole, allowedViews]
+    )
 
     return (
-        <AuthContext.Provider value={{
-            user, session, sysRole, sysUserId, permissions, allowedViews, loading,
-            signInWithGoogle, signInWithPassword, signInWithOtp, signOut, loginAsDemo
-        }}>
+        <AuthContext.Provider
+            value={{
+                user,
+                session,
+                sysRole,
+                sysUserId,
+                fullName,
+                permissions,
+                allowedViews,
+                loading,
+                isViewAllowed,
+                getFirstAllowedPath,
+                refreshUserConfig,
+                signInWithGoogle,
+                signInWithPassword,
+                signInWithOtp,
+                signOut,
+                loginAsDemo,
+            }}
+        >
             {children}
         </AuthContext.Provider>
     )

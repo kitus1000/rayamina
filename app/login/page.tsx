@@ -2,27 +2,27 @@
 
 import { motion, AnimatePresence } from 'framer-motion'
 import Image from 'next/image'
-import { Pickaxe, ShieldCheck, PlayCircle } from 'lucide-react'
+import { Pickaxe, ShieldCheck, Lock, Mail, Eye, EyeOff, KeyRound, ShieldAlert } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
 export default function AuthPage() {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
+    const [showPassword, setShowPassword] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [loading, setLoading] = useState(false)
     const [sent, setSent] = useState(false)
     const [mode, setMode] = useState<'password' | 'otp'>('password')
-    const { loginAsDemo, signInWithPassword, signInWithOtp, user } = useAuth()
+    const { signInWithPassword, signInWithOtp, user, getFirstAllowedPath } = useAuth()
     const router = useRouter()
 
     useEffect(() => {
         if (user) {
-            router.push('/dashboard')
+            router.replace(getFirstAllowedPath())
         }
-    }, [user, router])
+    }, [user, router, getFirstAllowedPath])
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -53,49 +53,72 @@ export default function AuthPage() {
         }
     }
 
-    const handleDemoLogin = () => {
-        loginAsDemo()
-    }
-
     return (
-        <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-slate-950 px-4">
+        <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-slate-950 px-4 py-8">
+            {/* Barra Láser Superior de Seguridad */}
+            <motion.div
+                initial={{ width: '0%' }}
+                animate={{ width: '100%' }}
+                transition={{ duration: 0.9, ease: 'easeOut' }}
+                className="fixed top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 via-emerald-500 to-blue-500 z-50 shadow-[0_0_15px_rgba(245,158,11,0.8)]"
+            />
 
-            {/* Background Image & Effects */}
+            {/* Fondo Animado Corporativo */}
             <div className="absolute inset-0 z-0">
                 <Image
                     src="/mining_finance_abstract.png"
                     alt="Background"
                     fill
                     priority
-                    className="object-cover opacity-40 mix-blend-overlay"
+                    className="object-cover opacity-35 mix-blend-overlay"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/80 to-slate-900/40" />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/85 to-slate-900/50" />
 
                 <motion.div
-                    animate={{ scale: [1, 1.05, 1], opacity: [0.3, 0.5, 0.3] }}
-                    transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-                    className="absolute top-[20%] left-[20%] w-[40%] h-[40%] bg-amber-600/10 rounded-full blur-[100px]"
+                    animate={{ scale: [1, 1.08, 1], opacity: [0.25, 0.45, 0.25] }}
+                    transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
+                    className="absolute top-[15%] left-[18%] w-[42%] h-[42%] bg-amber-600/15 rounded-full blur-[110px]"
                 />
                 <motion.div
-                    animate={{ scale: [1, 1.1, 1], opacity: [0.2, 0.4, 0.2] }}
-                    transition={{ duration: 10, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-                    className="absolute bottom-[20%] right-[20%] w-[40%] h-[40%] bg-blue-900/10 rounded-full blur-[100px]"
+                    animate={{ scale: [1, 1.12, 1], opacity: [0.2, 0.35, 0.2] }}
+                    transition={{ duration: 9, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
+                    className="absolute bottom-[15%] right-[18%] w-[42%] h-[42%] bg-emerald-700/10 rounded-full blur-[110px]"
                 />
             </div>
 
             <motion.div
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ duration: 0.6, ease: "easeOut" }}
-                className="relative z-10 w-full max-w-sm bg-slate-900/80 backdrop-blur-xl border border-slate-800/50 rounded-xl shadow-2xl overflow-hidden"
+                initial={{ y: 28, opacity: 0, scale: 0.97 }}
+                animate={{ y: 0, opacity: 1, scale: 1 }}
+                transition={{ duration: 0.55, ease: 'easeOut' }}
+                className="relative z-10 w-full max-w-md bg-slate-900/90 backdrop-blur-2xl border border-slate-800 rounded-2xl shadow-2xl overflow-hidden"
             >
-                {/* Header Compacto */}
-                <div className="bg-slate-950/50 p-6 flex flex-col items-center border-b border-slate-800/50">
-                    <div className="p-2 bg-amber-500/10 rounded-lg mb-3 ring-1 ring-amber-500/20 shadow-[0_0_15px_rgba(245,158,11,0.2)]">
-                        <Pickaxe className="w-6 h-6 text-amber-500" />
+                {/* Cabecera de Seguridad Corporativa */}
+                <div className="bg-slate-950/70 p-6 flex flex-col items-center border-b border-slate-800 relative">
+                    <motion.div
+                        animate={{
+                            boxShadow: [
+                                '0 0 15px rgba(245,158,11,0.2)',
+                                '0 0 28px rgba(245,158,11,0.5)',
+                                '0 0 15px rgba(245,158,11,0.2)',
+                            ],
+                        }}
+                        transition={{ duration: 3, repeat: Infinity }}
+                        className="p-3 bg-amber-500/15 rounded-2xl mb-3 ring-1 ring-amber-500/40"
+                    >
+                        <Pickaxe className="w-7 h-7 text-amber-500" />
+                    </motion.div>
+
+                    <h1 className="text-2xl font-black tracking-tight text-white">
+                        LA RAYA <span className="text-amber-500">MINA</span>
+                    </h1>
+                    <p className="text-slate-400 text-[11px] font-bold uppercase tracking-widest mt-1">
+                        Unidad Minera El Herrero • Sistema Blindado
+                    </p>
+
+                    <div className="mt-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-black uppercase tracking-wider">
+                        <ShieldCheck size={13} />
+                        Acceso Restringido a Usuarios Autorizados
                     </div>
-                    <h1 className="text-xl font-bold tracking-tight text-white">LA RAYA</h1>
-                    <p className="text-slate-400 text-xs font-medium uppercase tracking-widest mt-1">Mining Ops System</p>
                 </div>
 
                 <div className="p-6">
@@ -105,152 +128,164 @@ export default function AuthPage() {
                                 key="sent"
                                 initial={{ opacity: 0, scale: 0.95 }}
                                 animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.95 }}
                                 className="text-center py-4"
                             >
-                                <div className="w-16 h-16 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-green-500/20">
-                                    <ShieldCheck className="text-green-500" size={32} />
+                                <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/30">
+                                    <ShieldCheck className="text-emerald-500" size={32} />
                                 </div>
-                                <h3 className="text-white font-bold text-lg">¡Enlace Enviado!</h3>
+                                <h3 className="text-white font-black text-lg">¡Enlace de Seguridad Enviado!</h3>
                                 <p className="text-slate-400 text-sm mt-2 leading-relaxed">
-                                    Revisa tu correo corporativo para acceder directamente.
+                                    Revisa tu bandeja de correo corporativo autorizado para ingresar.
                                 </p>
                                 <button
                                     onClick={() => setSent(false)}
-                                    className="mt-6 text-amber-500 text-xs font-bold uppercase tracking-widest hover:underline"
+                                    className="mt-6 text-amber-500 text-xs font-black uppercase tracking-widest hover:underline"
                                 >
-                                    Volver al inicio
+                                    Volver al inicio de sesión
                                 </button>
                             </motion.div>
                         ) : (
-                            <div className="space-y-5">
+                            <motion.div
+                                key={mode}
+                                initial={{ opacity: 0, x: 15 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: -15 }}
+                                transition={{ duration: 0.25 }}
+                                className="space-y-5"
+                            >
                                 {error && (
                                     <motion.div
-                                        initial={{ opacity: 0, y: -10 }}
+                                        initial={{ opacity: 0, y: -8 }}
                                         animate={{ opacity: 1, y: 0 }}
-                                        className="bg-red-500/10 border border-red-500/50 p-3 rounded-xl text-red-500 text-xs text-center font-medium"
+                                        className="bg-rose-500/15 border border-rose-500/50 p-3.5 rounded-xl text-rose-400 text-xs flex items-start gap-2.5 font-semibold"
                                     >
-                                        {error}
+                                        <ShieldAlert size={16} className="shrink-0 mt-0.5 text-rose-500" />
+                                        <span>{error}</span>
                                     </motion.div>
                                 )}
 
                                 {mode === 'password' ? (
-                                    <form onSubmit={handleLogin} className="space-y-4" key="form-pwd">
-                                        <motion.div
-                                            initial={{ x: -20, opacity: 0 }}
-                                            animate={{ x: 0, opacity: 1 }}
-                                        >
-                                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Email Corporativo</label>
-                                            <input
-                                                type="email"
-                                                required
-                                                value={email}
-                                                onChange={(e) => setEmail(e.target.value)}
-                                                placeholder="usuario@tuempresa.com"
-                                                className="w-full bg-slate-950/50 border border-slate-700/80 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/20 transition-all shadow-inner"
-                                            />
-                                        </motion.div>
+                                    <form onSubmit={handleLogin} className="space-y-4">
+                                        <div>
+                                            <label className="block text-[11px] font-black text-slate-300 uppercase tracking-wider mb-1.5 ml-1">
+                                                Correo Corporativo Autorizado
+                                            </label>
+                                            <div className="relative">
+                                                <Mail
+                                                    size={16}
+                                                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-amber-500 pointer-events-none"
+                                                />
+                                                <input
+                                                    type="email"
+                                                    required
+                                                    autoComplete="username"
+                                                    value={email}
+                                                    onChange={(e) => setEmail(e.target.value)}
+                                                    placeholder="usuario@rayamina.com"
+                                                    className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 transition-all"
+                                                />
+                                            </div>
+                                        </div>
 
-                                        <motion.div
-                                            initial={{ x: -20, opacity: 0 }}
-                                            animate={{ x: 0, opacity: 1 }}
-                                            transition={{ delay: 0.1 }}
-                                        >
-                                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Contraseña / PIN</label>
-                                            <input
-                                                type="password"
-                                                required
-                                                value={password}
-                                                onChange={(e) => setPassword(e.target.value)}
-                                                placeholder="••••••••"
-                                                className="w-full bg-slate-950/50 border border-slate-700/80 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/20 transition-all shadow-inner font-mono"
-                                            />
-                                        </motion.div>
+                                        <div>
+                                            <label className="block text-[11px] font-black text-slate-300 uppercase tracking-wider mb-1.5 ml-1">
+                                                Contraseña / Clave de Seguridad
+                                            </label>
+                                            <div className="relative">
+                                                <KeyRound
+                                                    size={16}
+                                                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-amber-500 pointer-events-none"
+                                                />
+                                                <input
+                                                    type={showPassword ? 'text' : 'password'}
+                                                    required
+                                                    autoComplete="current-password"
+                                                    value={password}
+                                                    onChange={(e) => setPassword(e.target.value)}
+                                                    placeholder="••••••••"
+                                                    className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-11 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 transition-all font-mono"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowPassword(!showPassword)}
+                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-amber-500 p-1"
+                                                    tabIndex={-1}
+                                                >
+                                                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                                </button>
+                                            </div>
+                                        </div>
 
                                         <motion.button
-                                            whileHover={{ scale: 1.02 }}
-                                            whileTap={{ scale: 0.98 }}
+                                            whileHover={{ scale: 1.015 }}
+                                            whileTap={{ scale: 0.985 }}
                                             disabled={loading}
-                                            className="w-full bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white text-sm font-bold py-3 rounded-xl shadow-lg shadow-amber-900/30 disabled:opacity-70 flex justify-center items-center gap-2"
+                                            className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-sm font-black py-3.5 rounded-xl shadow-lg shadow-amber-900/30 disabled:opacity-70 flex justify-center items-center gap-2 uppercase tracking-wider cursor-pointer"
                                         >
-                                            {loading ? 'Validando...' : 'Entrar al Sistema'}
+                                            <Lock size={16} />
+                                            {loading ? 'Verificando Credenciales...' : 'Ingresar con Credencial'}
                                         </motion.button>
 
                                         <button
                                             type="button"
-                                            onClick={() => setMode('otp')}
-                                            className="w-full text-center text-[10px] text-slate-500 hover:text-amber-500 font-bold uppercase tracking-widest transition-colors"
+                                            onClick={() => {
+                                                setError(null)
+                                                setMode('otp')
+                                            }}
+                                            className="w-full text-center text-[11px] text-slate-400 hover:text-amber-400 font-bold uppercase tracking-wider transition-colors pt-1"
                                         >
-                                            ¿Eres Admin? Usa Link Mágico
+                                            ¿Olvidaste tu clave? Solicitar enlace al correo registrado
                                         </button>
                                     </form>
                                 ) : (
-                                    <form onSubmit={handleOtpRequest} className="space-y-4" key="form-otp">
-                                        <motion.div
-                                            initial={{ x: -20, opacity: 0 }}
-                                            animate={{ x: 0, opacity: 1 }}
-                                        >
-                                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Email de Administrador</label>
+                                    <form onSubmit={handleOtpRequest} className="space-y-4">
+                                        <div>
+                                            <label className="block text-[11px] font-black text-slate-300 uppercase tracking-wider mb-1.5 ml-1">
+                                                Correo Registrado en el Sistema
+                                            </label>
                                             <input
                                                 type="email"
                                                 required
                                                 value={email}
                                                 onChange={(e) => setEmail(e.target.value)}
-                                                placeholder="admin@tuempresa.com"
-                                                className="w-full bg-slate-950/50 border border-slate-700/80 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/20 transition-all shadow-inner"
+                                                placeholder="usuario@rayamina.com"
+                                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
                                             />
-                                        </motion.div>
+                                        </div>
 
                                         <motion.button
-                                            whileHover={{ scale: 1.02 }}
-                                            whileTap={{ scale: 0.98 }}
+                                            whileHover={{ scale: 1.015 }}
+                                            whileTap={{ scale: 0.985 }}
                                             disabled={loading}
-                                            className="w-full bg-slate-100 hover:bg-white text-slate-950 text-sm font-bold py-3 rounded-xl shadow-lg disabled:opacity-70 flex justify-center items-center gap-2"
+                                            className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 text-sm font-black py-3.5 rounded-xl shadow-lg disabled:opacity-70 flex justify-center items-center gap-2 uppercase tracking-wider"
                                         >
-                                            {loading ? 'Enviando...' : 'Recibir Link Mágico'}
+                                            {loading ? 'Verificando Registro...' : 'Enviar Enlace de Acceso'}
                                         </motion.button>
 
                                         <button
                                             type="button"
-                                            onClick={() => setMode('password')}
-                                            className="w-full text-center text-[10px] text-slate-500 hover:text-white font-bold uppercase tracking-widest transition-colors"
+                                            onClick={() => {
+                                                setError(null)
+                                                setMode('password')
+                                            }}
+                                            className="w-full text-center text-[11px] text-slate-400 hover:text-white font-bold uppercase tracking-wider transition-colors"
                                         >
-                                            Volver a Password
+                                            ← Volver a Contraseña
                                         </button>
                                     </form>
                                 )}
 
-                                <div className="relative py-3">
-                                    <div className="absolute inset-0 flex items-center">
-                                        <span className="w-full border-t border-slate-800" />
-                                    </div>
-                                    <div className="relative flex justify-center text-[10px] uppercase font-bold tracking-widest">
-                                        <span className="bg-slate-900 px-3 text-slate-500 rounded-full border border-slate-800">Opciones</span>
-                                    </div>
+                                {/* Nota de Seguridad Operativa */}
+                                <div className="pt-3 border-t border-slate-800/80 text-center space-y-1">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                        🔒 Protección de Tonelajes, Precios Unitarios y Pre-Nómina
+                                    </p>
+                                    <p className="text-[10px] text-slate-500 leading-relaxed">
+                                        El acceso y las vistas habilitadas (Web y APK Android) dependen exclusivamente de los usuarios y permisos configurados por el Administrador en el sistema.
+                                    </p>
                                 </div>
-
-                                <motion.button
-                                    whileHover={{ scale: 1.02 }}
-                                    whileTap={{ scale: 0.98 }}
-                                    onClick={handleDemoLogin}
-                                    className="w-full bg-slate-800/40 hover:bg-slate-700/60 text-slate-300 hover:text-white text-sm font-semibold py-3 rounded-xl flex items-center justify-center gap-2 transition-all border border-slate-700/50 hover:border-slate-500/50"
-                                >
-                                    <PlayCircle className="w-5 h-5 text-amber-500" />
-                                    Ingresar Modo Explorador (Escritorio)
-                                </motion.button>
-
-                                <motion.button
-                                    whileHover={{ scale: 1.02 }}
-                                    whileTap={{ scale: 0.98 }}
-                                    type="button"
-                                    onClick={() => {
-                                        loginAsDemo()
-                                        router.push('/mobile')
-                                    }}
-                                    className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg"
-                                >
-                                    📱 Abrir App Celular Android (Sin Expo Go)
-                                </motion.button>
-                            </div>
+                            </motion.div>
                         )}
                     </AnimatePresence>
                 </div>

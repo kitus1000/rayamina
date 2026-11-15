@@ -1,376 +1,523 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react';
 import {
-    View,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    ActivityIndicator,
-    ScrollView,
-    StyleSheet,
-    Alert,
-} from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
-import { HardHat, ShieldCheck, ChevronRight, Lock, Mail, Sparkles } from 'lucide-react-native'
-import { useRouter } from 'expo-router'
-import { useMobileAuth, ROLE_META, SysRole } from '../lib/auth-context'
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Animated,
+  Easing,
+} from 'react-native';
+import { useRouter } from 'expo-router';
+import {
+  HardHat,
+  Lock,
+  Mail,
+  ShieldCheck,
+  Eye,
+  EyeOff,
+  CheckCircle2,
+  AlertTriangle,
+} from 'lucide-react-native';
+import { useMobileAuth } from '../lib/auth-context';
 
 export default function LoginScreen() {
-    const [email, setEmail] = useState('')
-    const [password, setPassword] = useState('')
-    const [submitting, setSubmitting] = useState(false)
-    const router = useRouter()
-    const { signInWithCredentials, loginAsRole, theme } = useMobileAuth()
+  const { user, theme, loginWithCredentials, getFirstAllowedApkRoute } = useMobileAuth();
+  const isLight = theme === 'light';
+  const colors = {
+    bgMain: isLight ? '#F8FAFC' : '#020617',
+    bgCard: isLight ? '#FFFFFF' : '#0F172A',
+    bgInput: isLight ? '#F1F5F9' : '#1E293B',
+    border: isLight ? '#CBD5E1' : '#334155',
+    textPrimary: isLight ? '#0F172A' : '#F8FAFC',
+    textSecondary: isLight ? '#334155' : '#CBD5E1',
+    textMuted: isLight ? '#64748B' : '#94A3B8',
+  };
+  const router = useRouter();
 
-    const isLight = theme === 'light'
-    const bgMain = isLight ? '#F1F5F9' : '#020617'
-    const bgCard = isLight ? '#FFFFFF' : '#0F172A'
-    const bgInput = isLight ? '#FEFCE8' : '#020617'
-    const borderInput = isLight ? '#D97706' : '#334155'
-    const textPrimary = isLight ? '#0F172A' : '#F8FAFC'
-    const textSecondary = isLight ? '#475569' : '#94A3B8'
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
-    const handleSignIn = async () => {
-        if (!email.trim() || !password.trim()) {
-            Alert.alert('Campos requeridos', 'Ingresa tu correo corporativo y contraseña.')
-            return
-        }
-        setSubmitting(true)
-        const res = await signInWithCredentials(email, password)
-        setSubmitting(false)
+  // Animaciones de entrada y escudo de seguridad
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(28)).current;
+  const shieldPulse = useRef(new Animated.Value(1)).current;
+  const laserSweep = useRef(new Animated.Value(0)).current;
 
-        if (!res.ok) {
-            Alert.alert('Acceso Denegado', res.error || 'No se pudo iniciar sesión.')
-            return
-        }
-        router.replace('/dashboard')
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 480,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        friction: 7,
+        tension: 50,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(shieldPulse, {
+          toValue: 1.07,
+          duration: 1400,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(shieldPulse, {
+          toValue: 1,
+          duration: 1400,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(laserSweep, {
+          toValue: 1,
+          duration: 2200,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(laserSweep, {
+          toValue: 0,
+          duration: 2200,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, [fadeAnim, slideAnim, shieldPulse, laserSweep]);
+
+  useEffect(() => {
+    if (user) {
+      const target = getFirstAllowedApkRoute();
+      router.replace(target as any);
+    }
+  }, [user, getFirstAllowedApkRoute, router]);
+
+  const handleLogin = async () => {
+    setErrorMsg('');
+    if (!email.trim() || !password.trim()) {
+      setErrorMsg('Ingresa tu correo corporativo y tu contraseña asignada en el sistema.');
+      return;
     }
 
-    const handleQuickRole = async (role: SysRole) => {
-        setSubmitting(true)
-        await loginAsRole(role)
-        setSubmitting(false)
-        router.replace(ROLE_META[role].defaultRoute as any)
+    setLoading(true);
+    const res = await loginWithCredentials(email, password);
+    setLoading(false);
+
+    if (res.ok) {
+      const target = getFirstAllowedApkRoute();
+      router.replace(target as any);
+    } else {
+      setErrorMsg(res.error || 'Credenciales no autorizadas.');
     }
+  };
 
-    const quickRoles: SysRole[] = [
-        'DIRECTOR_OPERATIVO',
-        'GERENTE',
-        'SUPERINTENDENTE',
-        'JEFE_PLANEACION',
-        'SUPERVISOR',
-        'SUPER_ADMIN',
-    ]
+  const laserTranslateX = laserSweep.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-120, 240],
+  });
 
-    return (
-        <SafeAreaView style={[styles.container, { backgroundColor: bgMain }]}>
-            <ScrollView
-                contentContainerStyle={styles.scrollContent}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={[styles.container, { backgroundColor: colors.bgMain }]}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <Animated.View
+          style={{
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }],
+          }}
+        >
+          {/* CABECERA CORPORATIVA BLINDADA */}
+          <View style={styles.brandBox}>
+            <Animated.View
+              style={[
+                styles.logoShieldWrap,
+                { transform: [{ scale: shieldPulse }] },
+              ]}
             >
-                {/* Identidad Corporativa */}
-                <View style={styles.brandSection}>
-                    <View style={styles.logoBadge}>
-                        <HardHat size={34} color="#0F172A" />
-                    </View>
-                    <Text style={[styles.brandTitle, { color: textPrimary }]}>
-                        LA RAYA <Text style={{ color: '#D97706' }}>MINA</Text>
-                    </Text>
-                    <View style={styles.unitPill}>
-                        <ShieldCheck size={13} color="#10B981" />
-                        <Text style={styles.unitPillText}>
-                            UNIDAD EL HERRERO • SEMANA 38 CONECTADA
-                        </Text>
-                    </View>
+              <View style={styles.logoCircle}>
+                <HardHat color="#0f172a" size={34} />
+              </View>
+              <View style={styles.shieldCornerBadge}>
+                <ShieldCheck color="#022c22" size={14} />
+              </View>
+            </Animated.View>
+
+            <View style={styles.securityPill}>
+              <View style={styles.securityDot} />
+              <Text style={styles.securityPillText}>
+                ACCESO ENCRIPTADO • CONTROL DE VISTAS ACTIVO
+              </Text>
+            </View>
+
+            <Text style={[styles.brandTitle, { color: colors.textPrimary }]}>
+              LA RAYA MINA
+            </Text>
+            <Text style={styles.brandSub}>
+              PLATAFORMA MÓVIL OFICIAL • SEMANA 38
+            </Text>
+          </View>
+
+          {/* TARJETA DE ACCESO CORPORATIVO */}
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: colors.bgCard,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            {/* Barra láser animada superior */}
+            <View style={styles.laserTrack}>
+              <Animated.View
+                style={[
+                  styles.laserBeam,
+                  { transform: [{ translateX: laserTranslateX }] },
+                ]}
+              />
+            </View>
+
+            <View style={styles.cardHeaderRow}>
+              <ShieldCheck color="#10b981" size={18} />
+              <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>
+                Credenciales de Usuario Autorizado
+              </Text>
+            </View>
+
+            <Text style={[styles.cardDesc, { color: colors.textSecondary }]}>
+              Ingresa únicamente con la cuenta creada por el Administrador en el sistema central.
+            </Text>
+
+            {errorMsg ? (
+              <View style={styles.errorBanner}>
+                <AlertTriangle color="#f43f5e" size={16} />
+                <Text style={styles.errorBannerText}>{errorMsg}</Text>
+              </View>
+            ) : null}
+
+            <Text style={[styles.inputLabel, { color: colors.textMuted }]}>
+              CORREO CORPORATIVO REGISTRADO
+            </Text>
+            <View
+              style={[
+                styles.inputRow,
+                {
+                  backgroundColor: colors.bgInput,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Mail color={colors.textMuted} size={18} />
+              <TextInput
+                style={[styles.input, { color: colors.textPrimary }]}
+                placeholder="usuario@rayamina.com"
+                placeholderTextColor={colors.textMuted}
+                value={email}
+                onChangeText={(txt) => {
+                  setEmail(txt);
+                  if (errorMsg) setErrorMsg('');
+                }}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+              />
+            </View>
+
+            <Text style={[styles.inputLabel, { color: colors.textMuted }]}>
+              CONTRASEÑA DE SEGURIDAD
+            </Text>
+            <View
+              style={[
+                styles.inputRow,
+                {
+                  backgroundColor: colors.bgInput,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Lock color={colors.textMuted} size={18} />
+              <TextInput
+                style={[styles.input, { color: colors.textPrimary }]}
+                placeholder="••••••••"
+                placeholderTextColor={colors.textMuted}
+                value={password}
+                onChangeText={(txt) => {
+                  setPassword(txt);
+                  if (errorMsg) setErrorMsg('');
+                }}
+                secureTextEntry={!showPassword}
+              />
+              <TouchableOpacity
+                onPress={() => setShowPassword((prev) => !prev)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                {showPassword ? (
+                  <EyeOff color={colors.textMuted} size={18} />
+                ) : (
+                  <Eye color={colors.textMuted} size={18} />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.primaryBtn, loading && { opacity: 0.7 }]}
+              onPress={handleLogin}
+              disabled={loading}
+              activeOpacity={0.85}
+            >
+              {loading ? (
+                <View style={styles.btnContentRow}>
+                  <ActivityIndicator color="#0f172a" size="small" />
+                  <Text style={styles.primaryBtnText}>
+                    VERIFICANDO AUTORIZACIÓN...
+                  </Text>
                 </View>
-
-                {/* Tarjeta de Acceso con Credenciales */}
-                <View
-                    style={[
-                        styles.card,
-                        {
-                            backgroundColor: bgCard,
-                            borderColor: isLight ? '#CBD5E1' : '#1E293B',
-                        },
-                    ]}
-                >
-                    <View style={styles.cardAccentBar} />
-                    <Text style={[styles.cardTitle, { color: textPrimary }]}>
-                        Acceso Corporativo Móvil
-                    </Text>
-                    <Text style={[styles.cardSubtitle, { color: textSecondary }]}>
-                        Sincronizado en tiempo real con Supabase y Pre-Nómina Web
-                    </Text>
-
-                    <View style={styles.fieldGroup}>
-                        <Text style={[styles.fieldLabel, { color: textPrimary }]}>
-                            CORREO CORPORATIVO
-                        </Text>
-                        <View
-                            style={[
-                                styles.inputWrapper,
-                                { backgroundColor: bgInput, borderColor: borderInput },
-                            ]}
-                        >
-                            <Mail size={18} color="#D97706" />
-                            <TextInput
-                                value={email}
-                                onChangeText={setEmail}
-                                placeholder="usuario@rayamina.com"
-                                placeholderTextColor="#64748B"
-                                keyboardType="email-address"
-                                autoCapitalize="none"
-                                style={[styles.input, { color: textPrimary }]}
-                            />
-                        </View>
-                    </View>
-
-                    <View style={styles.fieldGroup}>
-                        <Text style={[styles.fieldLabel, { color: textPrimary }]}>
-                            CONTRASEÑA DE ACCESO
-                        </Text>
-                        <View
-                            style={[
-                                styles.inputWrapper,
-                                { backgroundColor: bgInput, borderColor: borderInput },
-                            ]}
-                        >
-                            <Lock size={18} color="#D97706" />
-                            <TextInput
-                                value={password}
-                                onChangeText={setPassword}
-                                placeholder="••••••••"
-                                placeholderTextColor="#64748B"
-                                secureTextEntry
-                                autoCapitalize="none"
-                                style={[styles.input, { color: textPrimary }]}
-                            />
-                        </View>
-                    </View>
-
-                    <TouchableOpacity
-                        onPress={handleSignIn}
-                        disabled={submitting}
-                        activeOpacity={0.85}
-                        style={styles.submitBtn}
-                    >
-                        {submitting ? (
-                            <ActivityIndicator color="#0F172A" />
-                        ) : (
-                            <>
-                                <Text style={styles.submitBtnText}>INGRESAR AL SISTEMA</Text>
-                                <ChevronRight size={20} color="#0F172A" />
-                            </>
-                        )}
-                    </TouchableOpacity>
+              ) : (
+                <View style={styles.btnContentRow}>
+                  <ShieldCheck color="#0f172a" size={18} />
+                  <Text style={styles.primaryBtnText}>
+                    INGRESAR A OPERACIÓN MINA
+                  </Text>
                 </View>
+              )}
+            </TouchableOpacity>
+          </View>
 
-                {/* Selector Directo por Nivel de Autorización */}
-                <View
-                    style={[
-                        styles.card,
-                        {
-                            backgroundColor: bgCard,
-                            borderColor: isLight ? '#CBD5E1' : '#1E293B',
-                            marginTop: 16,
-                        },
-                    ]}
-                >
-                    <View style={styles.quickHeader}>
-                        <Sparkles size={16} color="#D97706" />
-                        <Text style={[styles.quickTitle, { color: textPrimary }]}>
-                            ACCESO DIRECTO POR NIVEL DE AUTORIZACIÓN
-                        </Text>
-                    </View>
-                    <Text style={[styles.quickSub, { color: textSecondary }]}>
-                        Selecciona tu puesto para entrar con las herramientas y reglas correspondientes a tu jerarquía:
-                    </Text>
-
-                    {quickRoles.map((roleKey) => {
-                        const meta = ROLE_META[roleKey]
-                        return (
-                            <TouchableOpacity
-                                key={roleKey}
-                                onPress={() => handleQuickRole(roleKey)}
-                                activeOpacity={0.8}
-                                style={[
-                                    styles.roleBtn,
-                                    {
-                                        backgroundColor: isLight ? '#F8FAFC' : '#020617',
-                                        borderColor: meta.badgeColor + '60',
-                                    },
-                                ]}
-                            >
-                                <View
-                                    style={[
-                                        styles.roleDot,
-                                        { backgroundColor: meta.badgeColor },
-                                    ]}
-                                />
-                                <View style={{ flex: 1, marginRight: 8 }}>
-                                    <Text style={[styles.roleBtnTitle, { color: textPrimary }]}>
-                                        {meta.label}
-                                    </Text>
-                                    <Text
-                                        style={[styles.roleBtnDesc, { color: textSecondary }]}
-                                        numberOfLines={2}
-                                    >
-                                        {meta.description}
-                                    </Text>
-                                </View>
-                                <ChevronRight size={18} color={meta.badgeColor} />
-                            </TouchableOpacity>
-                        )
-                    })}
-                </View>
-            </ScrollView>
-        </SafeAreaView>
-    )
+          {/* SELLO DE PROTECCIÓN DE PRECIOS, TONELAJE Y VISTAS */}
+          <View
+            style={[
+              styles.securityFooterCard,
+              {
+                backgroundColor: colors.bgCard,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View style={styles.securityFooterHeader}>
+              <CheckCircle2 color="#10b981" size={15} />
+              <Text style={styles.securityFooterTitle}>
+                SINCRONIZACIÓN CENTRALIZADA WEB → APK
+              </Text>
+            </View>
+            <Text style={[styles.securityFooterText, { color: colors.textSecondary }]}>
+              Las pantallas visibles, precios unitarios, toneladas y Pre-Nómina se reflejan automáticamente de acuerdo con los permisos asignados a tu usuario en la aplicación central.
+            </Text>
+          </View>
+        </Animated.View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-    },
-    scrollContent: {
-        padding: 18,
-        paddingBottom: 40,
-    },
-    brandSection: {
-        alignItems: 'center',
-        marginVertical: 16,
-    },
-    logoBadge: {
-        width: 64,
-        height: 64,
-        borderRadius: 20,
-        backgroundColor: '#F59E0B',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 10,
-        elevation: 6,
-    },
-    brandTitle: {
-        fontSize: 26,
-        fontWeight: '900',
-        letterSpacing: -0.5,
-    },
-    unitPill: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#0F172A',
-        paddingHorizontal: 12,
-        paddingVertical: 5,
-        borderRadius: 20,
-        marginTop: 6,
-        gap: 6,
-    },
-    unitPillText: {
-        color: '#F8FAFC',
-        fontSize: 10,
-        fontWeight: '900',
-        letterSpacing: 0.6,
-    },
-    card: {
-        borderRadius: 22,
-        borderWidth: 1.5,
-        padding: 18,
-        overflow: 'hidden',
-    },
-    cardAccentBar: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 5,
-        backgroundColor: '#F59E0B',
-    },
-    cardTitle: {
-        fontSize: 18,
-        fontWeight: '900',
-        marginTop: 4,
-    },
-    cardSubtitle: {
-        fontSize: 12,
-        marginTop: 2,
-        marginBottom: 16,
-    },
-    fieldGroup: {
-        marginBottom: 14,
-    },
-    fieldLabel: {
-        fontSize: 11,
-        fontWeight: '900',
-        letterSpacing: 0.8,
-        marginBottom: 6,
-    },
-    inputWrapper: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        borderWidth: 1.5,
-        borderRadius: 14,
-        paddingHorizontal: 12,
-        height: 48,
-    },
-    input: {
-        flex: 1,
-        marginLeft: 10,
-        fontSize: 14,
-        fontWeight: '700',
-    },
-    submitBtn: {
-        backgroundColor: '#F59E0B',
-        height: 50,
-        borderRadius: 14,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginTop: 6,
-        gap: 8,
-    },
-    submitBtnText: {
-        color: '#0F172A',
-        fontSize: 14,
-        fontWeight: '900',
-        letterSpacing: 0.8,
-    },
-    quickHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-    },
-    quickTitle: {
-        fontSize: 13,
-        fontWeight: '900',
-        letterSpacing: 0.5,
-    },
-    quickSub: {
-        fontSize: 11,
-        marginTop: 4,
-        marginBottom: 12,
-        lineHeight: 15,
-    },
-    roleBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 12,
-        borderRadius: 14,
-        borderWidth: 1.5,
-        marginBottom: 8,
-    },
-    roleDot: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-        marginRight: 10,
-    },
-    roleBtnTitle: {
-        fontSize: 13,
-        fontWeight: '900',
-    },
-    roleBtnDesc: {
-        fontSize: 10,
-        marginTop: 2,
-        lineHeight: 14,
-    },
-})
+  container: { flex: 1 },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    padding: 20,
+    paddingVertical: 36,
+  },
+  brandBox: { alignItems: 'center', marginBottom: 22 },
+  logoShieldWrap: {
+    position: 'relative',
+    marginBottom: 12,
+  },
+  logoCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 22,
+    backgroundColor: '#f59e0b',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 10,
+  },
+  shieldCornerBadge: {
+    position: 'absolute',
+    bottom: -4,
+    right: -4,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#10b981',
+    borderWidth: 2,
+    borderColor: '#020617',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  securityPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(16, 185, 129, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 99,
+    marginBottom: 8,
+  },
+  securityDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10b981',
+  },
+  securityPillText: {
+    color: '#10b981',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.7,
+  },
+  brandTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
+  brandSub: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#f59e0b',
+    marginTop: 3,
+    letterSpacing: 1,
+  },
+  card: {
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 18,
+    marginBottom: 16,
+    overflow: 'hidden',
+  },
+  laserTrack: {
+    height: 3,
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderRadius: 2,
+    marginBottom: 14,
+    overflow: 'hidden',
+  },
+  laserBeam: {
+    width: 110,
+    height: 3,
+    backgroundColor: '#f59e0b',
+    borderRadius: 2,
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  cardTitle: {
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  cardDesc: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 14,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(244, 63, 94, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(244, 63, 94, 0.45)',
+    padding: 10,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  errorBannerText: {
+    flex: 1,
+    color: '#fda4af',
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 15,
+  },
+  inputLabel: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+    marginBottom: 6,
+    marginTop: 6,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    height: 48,
+    gap: 10,
+    marginBottom: 8,
+  },
+  input: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  primaryBtn: {
+    backgroundColor: '#f59e0b',
+    height: 50,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    elevation: 4,
+  },
+  btnContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  primaryBtnText: {
+    color: '#0f172a',
+    fontWeight: '900',
+    fontSize: 13,
+    letterSpacing: 0.5,
+  },
+  securityFooterCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+  },
+  securityFooterHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  securityFooterTitle: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#10b981',
+    letterSpacing: 0.6,
+  },
+  securityFooterText: {
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '600',
+  },
+});

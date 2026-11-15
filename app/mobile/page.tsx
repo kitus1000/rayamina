@@ -40,7 +40,11 @@ import {
     Download,
     Monitor,
     MapPin,
+    RefreshCw,
+    LogOut,
+    ShieldCheck,
 } from 'lucide-react'
+import AuthPage from '@/app/login/page'
 
 type MobileScreenId =
     | 'HOME'
@@ -120,9 +124,18 @@ const BLOG_STORE_KEY = 'ops_blog_tareas_store'
 const SEC_STORE_KEY = 'ops_security_incidents_store'
 
 export default function AndroidMobileAppPage() {
-    const { user, sysRole, loginAsDemo } = useAuth()
-    const rawRole = (sysRole || 'SUPER_ADMIN') as RoleKey
-    const activeRole: RoleKey = rawRole in ROLE_CONFIG ? rawRole : 'SUPER_ADMIN'
+    const {
+        user,
+        sysRole,
+        fullName,
+        loading: authLoading,
+        allowedViews,
+        isViewAllowed,
+        refreshUserConfig,
+        signOut,
+    } = useAuth()
+    const rawRole = (sysRole || 'SUPERVISOR') as RoleKey
+    const activeRole: RoleKey = rawRole in ROLE_CONFIG ? rawRole : 'SUPERVISOR'
 
     const [activeScreen, setActiveScreen] = useState<MobileScreenId>('HOME')
     const [drawerOpen, setDrawerOpen] = useState(false)
@@ -131,8 +144,71 @@ export default function AndroidMobileAppPage() {
     const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
     const [theme, setTheme] = useState<'light' | 'dark'>('light')
     const [laserTrigger, setLaserTrigger] = useState(0)
+    const [syncingViews, setSyncingViews] = useState(false)
 
-    // Permisos jerárquicos en vivo
+    const isMobileScreenAllowed = useCallback(
+        (screen: MobileScreenId): boolean => {
+            if (sysRole === 'SUPER_ADMIN') return true
+            switch (screen) {
+                case 'HOME':
+                    return isViewAllowed('/dashboard')
+                case 'PAYROLL':
+                    return isViewAllowed('/dashboard/nomina')
+                case 'PLANNING':
+                    return isViewAllowed('/dashboard/semana')
+                case 'SQUADS':
+                    return (
+                        isViewAllowed('/dashboard/catalogos/cuadrillas') ||
+                        isViewAllowed('/dashboard/catalogos')
+                    )
+                case 'PERSONNEL':
+                    return (
+                        isViewAllowed('/dashboard/catalogos/empleados') ||
+                        isViewAllowed('/dashboard/catalogos')
+                    )
+                case 'REPORTS':
+                case 'REPORT_NEW':
+                    return isViewAllowed('/dashboard/operacion/reportes-diarios')
+                case 'TASKS_SECURITY':
+                    return isViewAllowed('/dashboard/chat')
+                case 'CATALOGS':
+                    return (
+                        isViewAllowed('/dashboard/catalogos') ||
+                        isViewAllowed('/dashboard/catalogos/ubicaciones') ||
+                        isViewAllowed('/dashboard/catalogos/productos-mina')
+                    )
+                default:
+                    return false
+            }
+        },
+        [sysRole, isViewAllowed]
+    )
+
+    const getFirstAllowedMobileScreen = useCallback((): MobileScreenId => {
+        const order: MobileScreenId[] = [
+            'HOME',
+            'REPORTS',
+            'REPORT_NEW',
+            'SQUADS',
+            'PLANNING',
+            'TASKS_SECURITY',
+            'PAYROLL',
+            'PERSONNEL',
+            'CATALOGS',
+        ]
+        for (const s of order) {
+            if (isMobileScreenAllowed(s)) return s
+        }
+        return 'REPORTS'
+    }, [isMobileScreenAllowed])
+
+    useEffect(() => {
+        if (!authLoading && user && !isMobileScreenAllowed(activeScreen)) {
+            setActiveScreen(getFirstAllowedMobileScreen())
+        }
+    }, [authLoading, user, activeScreen, isMobileScreenAllowed, getFirstAllowedMobileScreen])
+
+    // Permisos jerárquicos en vivo vinculados a views_json
     const isJefaturaOrAbove = [
         'SUPER_ADMIN',
         'DIRECTOR_OPERATIVO',
@@ -147,12 +223,10 @@ export default function AndroidMobileAppPage() {
         'GERENTE',
     ].includes(activeRole)
     const canApproveReports = ['SUPER_ADMIN', 'SUPERINTENDENTE', 'GERENTE'].includes(activeRole)
-    const canViewFinancials = [
-        'SUPER_ADMIN',
-        'DIRECTOR_OPERATIVO',
-        'GERENTE',
-        'SUPERINTENDENTE',
-    ].includes(activeRole)
+    const canViewFinancials =
+        activeRole === 'SUPER_ADMIN' ||
+        isMobileScreenAllowed('PAYROLL') ||
+        (isJefaturaOrAbove && isMobileScreenAllowed('HOME'))
 
     // Estado de datos en vivo desde Supabase
     const [loading, setLoading] = useState(true)
@@ -472,15 +546,21 @@ export default function AndroidMobileAppPage() {
         loadAllSupabaseData()
     }, [loadAllSupabaseData])
 
-    const navigateToScreen = (screen: MobileScreenId, requiresJefatura = false) => {
-        if (requiresJefatura && !isJefaturaOrAbove) {
-            toast.error('Acceso restringido: Esta vista es exclusiva de Jefatura hacia arriba.')
-            setRoleModalOpen(true)
+    const navigateToScreen = (screen: MobileScreenId, _requiresJefatura = false) => {
+        if (!isMobileScreenAllowed(screen)) {
+            toast.error('Vista restringida: Tu perfil no tiene habilitada esta pantalla en la configuración central.')
             return
         }
         setDrawerOpen(false)
         setLaserTrigger((prev) => prev + 1)
         setActiveScreen(screen)
+    }
+
+    const handleSyncViewsNow = async () => {
+        setSyncingViews(true)
+        await refreshUserConfig()
+        setSyncingViews(false)
+        toast.success('Vistas y permisos sincronizados desde la central.')
     }
 
     // Cargar integrantes cuando cambia la cuadrilla en el asistente de captura
@@ -1011,6 +1091,28 @@ export default function AndroidMobileAppPage() {
             ],
         },
     ]
+        .map((sec) => ({
+            ...sec,
+            items: sec.items.filter((it) => isMobileScreenAllowed(it.id)),
+        }))
+        .filter((sec) => sec.items.length > 0)
+
+    if (authLoading) {
+        return (
+            <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 animate-pulse mb-3">
+                    <ShieldCheck size={24} />
+                </div>
+                <p className="text-xs font-black uppercase tracking-widest text-amber-400">
+                    Verificando Credencial Operativa...
+                </p>
+            </div>
+        )
+    }
+
+    if (!user) {
+        return <AuthPage />
+    }
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col max-w-md mx-auto shadow-2xl border-x border-slate-800 relative overflow-hidden">
@@ -2275,7 +2377,7 @@ export default function AndroidMobileAppPage() {
                 </AnimatePresence>
             </main>
 
-            {/* BARRA INFERIOR DE NAVEGACIÓN ESTILO ANDROID NATIVO */}
+            {/* BARRA INFERIOR DE NAVEGACIÓN ESTILO ANDROID NATIVO (FILTRADA SEGÚN VISTAS ASIGNADAS) */}
             <nav className="h-16 bg-slate-900 border-t border-slate-800 fixed bottom-0 left-0 right-0 max-w-md mx-auto z-30 flex items-center justify-around px-2 shadow-2xl">
                 {[
                     { id: 'HOME' as MobileScreenId, label: 'Mando', icon: LayoutDashboard },
@@ -2288,7 +2390,9 @@ export default function AndroidMobileAppPage() {
                     },
                     { id: 'PLANNING' as MobileScreenId, label: 'Metas S-38', icon: Calendar },
                     { id: 'TASKS_SECURITY' as MobileScreenId, label: 'Bitácora', icon: ShieldAlert },
-                ].map((tab) => {
+                ]
+                    .filter((tab) => isMobileScreenAllowed(tab.id))
+                    .map((tab) => {
                     const isActive = activeScreen === tab.id
                     const IconComp = tab.icon
                     if (tab.primary) {
@@ -2367,33 +2471,39 @@ export default function AndroidMobileAppPage() {
                                     </button>
                                 </div>
 
-                                {/* Selector de Jerarquía / Autorización en el Menú */}
-                                <div className="bg-slate-950 border border-amber-500/40 rounded-xl p-2.5">
-                                    <div className="text-[9px] font-black text-amber-400 uppercase mb-1">
-                                        NIVEL DE AUTORIZACIÓN ACTIVO
+                                {/* Credencial Verificada (Solo Lectura - Sincronizada con Central) */}
+                                <div className="bg-slate-950 border border-emerald-500/40 rounded-xl p-2.5 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[9px] font-black text-emerald-400 uppercase flex items-center gap-1">
+                                            <ShieldCheck size={11} /> CREDENCIAL VERIFICADA
+                                        </span>
+                                        <span className={`px-2 py-0.5 rounded text-[9px] font-black ${currentRoleInfo.badgeBg}`}>
+                                            {currentRoleInfo.shortLabel}
+                                        </span>
                                     </div>
-                                    <select
-                                        value={activeRole}
-                                        onChange={(e) => loginAsDemo(e.target.value)}
-                                        className="w-full rounded-lg px-2 py-1.5 text-xs font-bold"
-                                    >
-                                        <option value="SUPER_ADMIN">👑 Super Admin (Total)</option>
-                                        <option value="DIRECTOR_OPERATIVO">
-                                            🏛️ Director Operativo (Finanzas)
-                                        </option>
-                                        <option value="GERENTE">
-                                            ⭐ Gerente Operaciones (Jefatura)
-                                        </option>
-                                        <option value="SUPERINTENDENTE">
-                                            ⛏️ Superintendente (Mueve Cuadrillas)
-                                        </option>
-                                        <option value="JEFE_PLANEACION">
-                                            📐 Jefe Planeación (Metas S-38)
-                                        </option>
-                                        <option value="SUPERVISOR">
-                                            📋 Supervisor (Reportes & Seguridad)
-                                        </option>
-                                    </select>
+                                    <div className="text-xs font-black text-white truncate">
+                                        {fullName || user?.email}
+                                    </div>
+                                    <div className="text-[10px] text-slate-400 truncate">
+                                        {user?.email}
+                                    </div>
+                                    <div className="flex items-center gap-1.5 pt-1">
+                                        <button
+                                            onClick={handleSyncViewsNow}
+                                            disabled={syncingViews}
+                                            className="flex-1 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-400 text-[10px] font-black flex items-center justify-center gap-1 border border-slate-700"
+                                        >
+                                            <RefreshCw size={11} className={syncingViews ? 'animate-spin' : ''} />
+                                            Sincronizar Vistas
+                                        </button>
+                                        <button
+                                            onClick={() => signOut()}
+                                            className="py-1.5 px-2.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 text-[10px] font-black flex items-center gap-1 border border-rose-500/30"
+                                        >
+                                            <LogOut size={11} />
+                                            Salir
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
@@ -2578,7 +2688,7 @@ export default function AndroidMobileAppPage() {
                 )}
             </AnimatePresence>
 
-            {/* MODAL DE SELECCIÓN DE ROL / NIVEL DE AUTORIZACIÓN */}
+            {/* MODAL INFORMATIVO DE CREDENCIAL DE SEGURIDAD Y VISTAS ASIGNADAS (SOLO LECTURA) */}
             <AnimatePresence>
                 {roleModalOpen && (
                     <motion.div
@@ -2587,11 +2697,14 @@ export default function AndroidMobileAppPage() {
                         exit={{ opacity: 0 }}
                         className="fixed inset-0 bg-slate-950/80 z-50 flex items-center justify-center p-4"
                     >
-                        <div className="w-full max-w-sm bg-slate-900 border-2 border-amber-500 rounded-3xl p-5 space-y-3">
+                        <div className="w-full max-w-sm bg-slate-900 border-2 border-emerald-500 rounded-3xl p-5 space-y-3">
                             <div className="flex justify-between items-center">
-                                <h3 className="text-base font-black text-white">
-                                    Nivel de Autorización
-                                </h3>
+                                <div className="flex items-center gap-2">
+                                    <ShieldCheck size={18} className="text-emerald-400" />
+                                    <h3 className="text-base font-black text-white">
+                                        Credencial Sincronizada
+                                    </h3>
+                                </div>
                                 <button
                                     onClick={() => setRoleModalOpen(false)}
                                     className="p-1.5 rounded-lg bg-slate-800 text-slate-300"
@@ -2599,36 +2712,42 @@ export default function AndroidMobileAppPage() {
                                     <X size={18} />
                                 </button>
                             </div>
-                            <p className="text-xs text-slate-400">
-                                Selecciona el puesto para adaptar inmediatamente los módulos y permisos en el celular:
-                            </p>
-                            <div className="space-y-2 max-h-96 overflow-y-auto">
-                                {(Object.keys(ROLE_CONFIG) as RoleKey[]).map((rk) => {
-                                    const cfg = ROLE_CONFIG[rk]
-                                    const isCur = activeRole === rk
-                                    return (
-                                        <button
-                                            key={rk}
-                                            onClick={() => {
-                                                loginAsDemo(rk)
-                                                setRoleModalOpen(false)
-                                                toast.success(`Perfil cambiado a ${cfg.shortLabel}`)
-                                            }}
-                                            className={`w-full p-3 rounded-xl border text-left transition-all ${
-                                                isCur
-                                                    ? 'bg-amber-500/20 border-amber-500'
-                                                    : 'bg-slate-950 border-slate-800'
-                                            }`}
-                                        >
-                                            <div className="text-xs font-black text-white">
-                                                {cfg.label}
-                                            </div>
-                                            <div className="text-[10px] text-slate-400 mt-0.5">
-                                                {cfg.description}
-                                            </div>
-                                        </button>
-                                    )
-                                })}
+                            <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
+                                <div className="text-xs font-black text-amber-400">
+                                    {currentRoleInfo.label}
+                                </div>
+                                <div className="text-xs font-bold text-white">
+                                    {fullName || user?.email}
+                                </div>
+                                <div className="text-[11px] text-slate-400">
+                                    {currentRoleInfo.description}
+                                </div>
+                            </div>
+                            <div className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-1.5">
+                                <div className="text-[10px] font-black uppercase text-emerald-400">
+                                    Seguridad de Precios, Tonelaje y Nómina
+                                </div>
+                                <p className="text-[11px] text-slate-300 leading-relaxed">
+                                    Las pantallas visibles en este dispositivo se reflejan automáticamente desde el panel central de <strong>Configuración de Visiones</strong> ({allowedViews?.length || 0} módulos autorizados).
+                                </p>
+                            </div>
+                            <div className="flex gap-2 pt-1">
+                                <button
+                                    onClick={async () => {
+                                        await handleSyncViewsNow()
+                                        setRoleModalOpen(false)
+                                    }}
+                                    className="flex-1 py-2.5 bg-amber-500 text-slate-950 rounded-xl text-xs font-black uppercase flex items-center justify-center gap-1.5"
+                                >
+                                    <RefreshCw size={14} className={syncingViews ? 'animate-spin' : ''} />
+                                    Sincronizar Vistas
+                                </button>
+                                <button
+                                    onClick={() => setRoleModalOpen(false)}
+                                    className="py-2.5 px-4 bg-slate-800 text-slate-200 rounded-xl text-xs font-black uppercase"
+                                >
+                                    Cerrar
+                                </button>
                             </div>
                         </div>
                     </motion.div>

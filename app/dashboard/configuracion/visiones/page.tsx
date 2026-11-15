@@ -3,24 +3,135 @@
 import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import {
-    Save, Shield, Users, LayoutDashboard, Pickaxe,
-    DollarSign, FileText, HardHat, Settings,
-    MessageSquare, Calendar, CheckCircle, AlertCircle,
-    ChevronRight, Eye, EyeOff
+    Save,
+    Shield,
+    Users,
+    LayoutDashboard,
+    Pickaxe,
+    DollarSign,
+    FileText,
+    HardHat,
+    Settings,
+    MessageSquare,
+    Calendar,
+    ChevronRight,
+    Eye,
+    Smartphone,
+    RotateCcw,
+    CheckSquare,
+    Lock,
+    MapPin,
+    Coins,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { DEFAULT_ROLE_VIEWS } from '@/lib/auth-context'
+import { toast } from 'sonner'
 
-// Definición de todos los módulos del sistema (debe coincidir con Sidebar)
-const ALL_MODULES = [
-    { label: 'Panel Principal', icon: LayoutDashboard, path: '/dashboard', name: 'Dashboard Global' },
-    { label: 'Panel Principal', icon: Calendar, path: '/dashboard/semana', name: 'Semana en Curso' },
-    { label: 'Panel Principal', icon: Pickaxe, path: '/dashboard/operacion/reportes-diarios', name: 'Reportes Diarios' },
-    { label: 'Panel Principal', icon: MessageSquare, path: '/dashboard/chat', name: 'Blog de Tareas' },
-    { label: 'Administración', icon: DollarSign, path: '/dashboard/nomina', name: 'Pre-Nómina / Nómina' },
-    { label: 'Administración', icon: FileText, path: '/dashboard/catalogos', name: 'Catálogos Base' },
-    { label: 'Administración', icon: Users, path: '/dashboard/catalogos/empleados', name: 'Catálogo de Empleados' },
-    { label: 'Administración', icon: HardHat, path: '/dashboard/configuracion/usuarios', name: 'Accesos / Usuarios' },
-    { label: 'Administración', icon: Settings, path: '/dashboard/configuracion', name: 'Configuración General' },
+export const ALL_SYSTEM_MODULES = [
+    {
+        pillar: '1. Jefatura y Dirección (Precios, Toneladas y Nómina)',
+        icon: LayoutDashboard,
+        path: '/dashboard',
+        name: 'Dashboard Ejecutivo & Financiero',
+        apkScreen: 'APK: Mando Ejecutivo (KPIs, Tonelaje y Costos)',
+        confidential: true,
+    },
+    {
+        pillar: '1. Jefatura y Dirección (Precios, Toneladas y Nómina)',
+        icon: DollarSign,
+        path: '/dashboard/nomina',
+        name: 'Pre-Nómina, Raya y Tarifas S-38',
+        apkScreen: 'APK: Pre-Nómina y Destajos S-38',
+        confidential: true,
+    },
+    {
+        pillar: '2. Planeación e Ingeniería',
+        icon: Calendar,
+        path: '/dashboard/semana',
+        name: 'Planeación Semanal (Metas vs Ejecución)',
+        apkScreen: 'APK: Metas Semana 38 vs Ejecución',
+        confidential: false,
+    },
+    {
+        pillar: '2. Planeación e Ingeniería',
+        icon: MapPin,
+        path: '/dashboard/catalogos/ubicaciones',
+        name: 'Frentes, Rebajes y Ubicaciones',
+        apkScreen: 'APK: Catálogo de Frentes y Rebajes',
+        confidential: false,
+    },
+    {
+        pillar: '2. Planeación e Ingeniería',
+        icon: Coins,
+        path: '/dashboard/catalogos/productos-mina',
+        name: 'Catálogo de Conceptos y Precios Unitarios',
+        apkScreen: 'APK: Conceptos de Mina y Tarifas',
+        confidential: true,
+    },
+    {
+        pillar: '3. Operación Mina (Campo)',
+        icon: Users,
+        path: '/dashboard/catalogos/cuadrillas',
+        name: 'Pizarra Táctica de Cuadrillas',
+        apkScreen: 'APK: Cancha Táctica de Cuadrillas',
+        confidential: false,
+    },
+    {
+        pillar: '3. Operación Mina (Campo)',
+        icon: HardHat,
+        path: '/dashboard/catalogos/empleados',
+        name: 'Fuerza Operativa (Plantilla de Mineros)',
+        apkScreen: 'APK: Fuerza Operativa y Personal',
+        confidential: false,
+    },
+    {
+        pillar: '4. Reportes y Seguridad',
+        icon: Pickaxe,
+        path: '/dashboard/operacion/reportes-diarios',
+        name: 'Reportes Diarios, Captura de Turno e Incidencias',
+        apkScreen: 'APK: Reportes Diarios + Captura 4 Pasos',
+        confidential: false,
+    },
+    {
+        pillar: '4. Reportes y Seguridad',
+        icon: MessageSquare,
+        path: '/dashboard/chat',
+        name: 'Bitácora Operativa, Tareas y Alertas de Seguridad',
+        apkScreen: 'APK: Bitácora y Seguridad en Vivo',
+        confidential: false,
+    },
+    {
+        pillar: '5. Administración y Sistema',
+        icon: FileText,
+        path: '/dashboard/catalogos',
+        name: 'Catálogos Maestros Completos',
+        apkScreen: 'APK: Todos los Catálogos Maestros',
+        confidential: false,
+    },
+    {
+        pillar: '5. Administración y Sistema',
+        icon: Users,
+        path: '/dashboard/configuracion/usuarios',
+        name: 'Control de Usuarios y Contraseñas',
+        apkScreen: 'Solo Web Admin (Creación de Usuarios)',
+        confidential: true,
+    },
+    {
+        pillar: '5. Administración y Sistema',
+        icon: Eye,
+        path: '/dashboard/configuracion/visiones',
+        name: 'Gestión de Visiones (Web + APK)',
+        apkScreen: 'Solo Web Admin (Asignación de Vistas)',
+        confidential: true,
+    },
+    {
+        pillar: '5. Administración y Sistema',
+        icon: Settings,
+        path: '/dashboard/configuracion',
+        name: 'Configuración General del Sistema',
+        apkScreen: 'Solo Web Admin',
+        confidential: true,
+    },
 ]
 
 export default function VisionesPage() {
@@ -29,7 +140,6 @@ export default function VisionesPage() {
     const [allowedPaths, setAllowedPaths] = useState<string[]>([])
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
-    const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
 
     useEffect(() => {
         fetchUsers()
@@ -37,60 +147,60 @@ export default function VisionesPage() {
 
     const fetchUsers = async () => {
         setLoading(true)
-        const { data, error } = await supabase
+        const { data } = await supabase
             .from('sys_users')
-            .select('id, email, role') // Select only safe columns first
+            .select('id, email, full_name, nickname, role, views_json, active')
             .eq('active', true)
             .order('email')
 
         if (data) {
-            // Try to fetch views_json separately to see if it exists
-            const { data: viewsData } = await supabase.from('sys_users').select('id, views_json').eq('active', true)
-
-            let finalUsers: any[] = data;
-
-            if (viewsData) {
-                finalUsers = data.map(u => ({
-                    ...u,
-                    views_json: viewsData.find(v => v.id === u.id)?.views_json
-                }))
-                setUsers(finalUsers)
-            } else {
-                setUsers(finalUsers)
-            }
-
-            // Auto-select user if URL has userId
-            const params = new URLSearchParams(window.location.search);
-            const urlUserId = params.get('userId');
-            if (urlUserId) {
-                const toSelect = finalUsers.find(u => u.id === urlUserId);
-                if (toSelect) {
-                    setSelectedUserId(toSelect.id);
-                    setAllowedPaths(Array.isArray(toSelect.views_json) ? toSelect.views_json : []);
-                }
+            setUsers(data)
+            const params = new URLSearchParams(window.location.search)
+            const urlUserId = params.get('userId')
+            const targetUser = urlUserId ? data.find((u) => u.id === urlUserId) : data[0]
+            if (targetUser) {
+                setSelectedUserId(targetUser.id)
+                setAllowedPaths(
+                    Array.isArray(targetUser.views_json) && targetUser.views_json.length > 0
+                        ? targetUser.views_json
+                        : DEFAULT_ROLE_VIEWS[targetUser.role] || []
+                )
             }
         }
         setLoading(false)
     }
 
-    const handleSelectUser = (user: any) => {
-        setSelectedUserId(user.id)
-        setAllowedPaths(Array.isArray(user.views_json) ? user.views_json : [])
-        setMessage(null)
+    const handleSelectUser = (u: any) => {
+        setSelectedUserId(u.id)
+        setAllowedPaths(
+            Array.isArray(u.views_json) && u.views_json.length > 0
+                ? u.views_json
+                : DEFAULT_ROLE_VIEWS[u.role] || []
+        )
     }
 
     const togglePath = (path: string) => {
         if (allowedPaths.includes(path)) {
-            setAllowedPaths(allowedPaths.filter(p => p !== path))
+            setAllowedPaths(allowedPaths.filter((p) => p !== path))
         } else {
             setAllowedPaths([...allowedPaths, path])
         }
     }
 
+    const handleRestoreRoleDefaults = () => {
+        if (!selectedUser) return
+        const defaults = DEFAULT_ROLE_VIEWS[selectedUser.role] || []
+        setAllowedPaths(defaults)
+        toast.info(`Vistas recomendadas cargadas para ${selectedUser.role}. Presiona Guardar para aplicar.`)
+    }
+
+    const handleSelectAll = () => {
+        setAllowedPaths(ALL_SYSTEM_MODULES.map((m) => m.path))
+    }
+
     const handleSave = async () => {
         if (!selectedUserId) return
         setSaving(true)
-        setMessage(null)
 
         const { error } = await supabase
             .from('sys_users')
@@ -98,150 +208,253 @@ export default function VisionesPage() {
             .eq('id', selectedUserId)
 
         if (error) {
-            if (error.message.includes('views_json')) {
-                setMessage({ type: 'error', text: '⚠️ ERROR CRÍTICO: La columna "views_json" no existe en la base de datos. Debes ejecutar la migración SQL en Supabase primero.' })
-            } else {
-                setMessage({ type: 'error', text: 'Error al ahorrar: ' + error.message })
-            }
+            toast.error('Error al guardar visiones: ' + error.message)
         } else {
-            setMessage({ type: 'success', text: 'Visiones actualizadas correctamente' })
-            fetchUsers() // Refresh list to update local state
+            toast.success('Vistas actualizadas y sincronizadas con Web y APK Android')
+            setUsers(
+                users.map((u) =>
+                    u.id === selectedUserId ? { ...u, views_json: allowedPaths } : u
+                )
+            )
         }
         setSaving(false)
     }
 
-    const selectedUser = users.find(u => u.id === selectedUserId)
+    const selectedUser = users.find((u) => u.id === selectedUserId)
+    const pillars = Array.from(new Set(ALL_SYSTEM_MODULES.map((m) => m.pillar)))
 
     return (
-        <div className="max-w-6xl mx-auto pb-10">
-            {/* Header */}
-            <div className="mb-8">
-                <Link href="/dashboard/configuracion" className="text-sm text-slate-400 hover:text-white flex items-center gap-1 mb-4 w-fit transition-colors">
-                    ← Volver a Configuración
+        <div className="max-w-7xl mx-auto pb-12 space-y-6">
+            {/* Cabecera */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                <div>
+                    <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-500 mb-1">
+                        <Smartphone size={15} /> Sincronización en Tiempo Real Web + APK Android
+                    </div>
+                    <h1 className="text-2xl md:text-3xl font-black text-white flex items-center gap-3">
+                        <Shield className="text-amber-500" size={30} />
+                        Control de Vistas por Usuario (App Web y APK)
+                    </h1>
+                    <p className="text-slate-400 text-sm mt-1">
+                        Define exactamente qué pantallas puede ver cada usuario. En el APK Android solo se reflejarán las vistas que actives aquí, protegiendo precios unitarios, tonelaje y nómina.
+                    </p>
+                </div>
+
+                <Link
+                    href="/dashboard/configuracion/usuarios"
+                    className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-black uppercase tracking-wider border border-slate-700 shrink-0 self-start md:self-center"
+                >
+                    Administrar Usuarios y Claves →
                 </Link>
-                <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-                    <Shield className="text-amber-500" size={32} />
-                    Gestión de Visiones
-                </h1>
-                <p className="text-slate-400 mt-2">Configura el acceso granular a los módulos del sistema para Jefes y Supervisores.</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-
-                {/* Panel Izquierdo: Lista de Usuarios */}
-                <div className="md:col-span-4 space-y-4">
-                    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-                        <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center gap-2">
-                            <Users size={18} className="text-amber-500" />
-                            <h2 className="font-bold text-white">Usuarios Activos</h2>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Columna Izquierda: Lista de Usuarios */}
+                <div className="lg:col-span-4 space-y-4">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                        <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <Users size={18} className="text-amber-500" />
+                                <h2 className="font-black text-white text-sm uppercase tracking-wider">
+                                    Usuarios Registrados
+                                </h2>
+                            </div>
+                            <span className="text-xs font-bold text-slate-400">{users.length} activos</span>
                         </div>
-                        <div className="max-h-[500px] overflow-y-auto custom-scrollbar">
+                        <div className="max-h-[580px] overflow-y-auto custom-scrollbar divide-y divide-slate-800/60">
                             {loading ? (
-                                <div className="p-10 text-center text-slate-500 animate-pulse">Cargando...</div>
+                                <div className="p-10 text-center text-slate-500 animate-pulse font-bold">
+                                    Cargando usuarios...
+                                </div>
                             ) : (
-                                users.map(user => (
-                                    <button
-                                        key={user.id}
-                                        onClick={() => handleSelectUser(user)}
-                                        className={`w-full text-left p-4 border-b border-slate-800/50 transition-all flex items-center justify-between group ${selectedUserId === user.id ? 'bg-amber-500/10 border-l-4 border-l-amber-500' : 'hover:bg-slate-800/50'}`}
-                                    >
-                                        <div className="overflow-hidden">
-                                            <div className={`font-medium ${selectedUserId === user.id ? 'text-amber-500' : 'text-slate-200'}`}>
-                                                {user.email.split('@')[0]}
-                                            </div>
-                                            <div className="text-xs text-slate-500 truncate">{user.email}</div>
-                                            <div className="flex gap-2 mt-1">
-                                                <span className="text-[10px] px-1.5 py-0.5 bg-slate-800 rounded text-slate-400 uppercase font-bold">{user.role}</span>
-                                                {user.views_json && user.views_json.length > 0 && (
-                                                    <span className="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded font-bold">
-                                                        {user.views_json.length} Vistas
+                                users.map((u) => {
+                                    const isSelected = selectedUserId === u.id
+                                    const viewCount = Array.isArray(u.views_json)
+                                        ? u.views_json.length
+                                        : (DEFAULT_ROLE_VIEWS[u.role] || []).length
+                                    return (
+                                        <button
+                                            key={u.id}
+                                            onClick={() => handleSelectUser(u)}
+                                            className={`w-full text-left p-4 transition-all flex items-center justify-between group cursor-pointer ${
+                                                isSelected
+                                                    ? 'bg-amber-500/15 border-l-4 border-l-amber-500'
+                                                    : 'hover:bg-slate-800/50'
+                                            }`}
+                                        >
+                                            <div className="min-w-0 pr-2">
+                                                <div
+                                                    className={`font-black text-sm truncate ${
+                                                        isSelected ? 'text-amber-500' : 'text-white'
+                                                    }`}
+                                                >
+                                                    {u.full_name || u.nickname || u.email.split('@')[0]}
+                                                </div>
+                                                <div className="text-xs text-slate-400 truncate font-mono">
+                                                    {u.email}
+                                                </div>
+                                                <div className="flex flex-wrap gap-1.5 mt-2">
+                                                    <span className="text-[10px] px-2 py-0.5 bg-slate-800 rounded text-amber-400 uppercase font-black border border-slate-700">
+                                                        {u.role}
                                                     </span>
-                                                )}
+                                                    <span className="text-[10px] px-2 py-0.5 bg-emerald-500/15 text-emerald-400 rounded font-black border border-emerald-500/30">
+                                                        {u.role === 'SUPER_ADMIN'
+                                                            ? 'Acceso Total'
+                                                            : `${viewCount} Vistas Web/APK`}
+                                                    </span>
+                                                </div>
                                             </div>
-                                        </div>
-                                        <ChevronRight size={16} className={`text-slate-600 transition-transform ${selectedUserId === user.id ? 'translate-x-1 text-amber-500' : 'group-hover:translate-x-1'}`} />
-                                    </button>
-                                ))
+                                            <ChevronRight
+                                                size={18}
+                                                className={`shrink-0 transition-transform ${
+                                                    isSelected
+                                                        ? 'translate-x-1 text-amber-500'
+                                                        : 'text-slate-600 group-hover:translate-x-1'
+                                                }`}
+                                            />
+                                        </button>
+                                    )
+                                })
                             )}
                         </div>
                     </div>
                 </div>
 
-                {/* Panel Derecho: Configuración de Visiones */}
-                <div className="md:col-span-8">
-                    {selectedUserId ? (
-                        <div className="bg-slate-900 border border-slate-800 rounded-xl flex flex-col h-full shadow-2xl">
-                            {/* Header Panel Derecho */}
-                            <div className="p-6 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+                {/* Columna Derecha: Matriz de Vistas Web + APK */}
+                <div className="lg:col-span-8">
+                    {selectedUser ? (
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl flex flex-col shadow-2xl overflow-hidden">
+                            {/* Cabecera del Usuario Seleccionado */}
+                            <div className="p-5 border-b border-slate-800 bg-slate-950 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                                 <div>
-                                    <h3 className="text-xl font-bold text-white">Personalizar Visiones</h3>
-                                    <p className="text-sm text-slate-400">Usuario: <span className="text-amber-500 font-mono">{selectedUser?.email}</span></p>
+                                    <div className="flex items-center gap-2">
+                                        <h3 className="text-lg font-black text-white">
+                                            {selectedUser.full_name || selectedUser.email}
+                                        </h3>
+                                        <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[10px] font-black uppercase">
+                                            {selectedUser.role}
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-slate-400 font-mono mt-0.5">
+                                        {selectedUser.email} • Las vistas marcadas se reflejan inmediatamente en su APK Android.
+                                    </p>
                                 </div>
-                                <button
-                                    onClick={handleSave}
-                                    disabled={saving}
-                                    className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold transition-all ${saving ? 'bg-slate-700 text-slate-500' : 'bg-amber-600 hover:bg-amber-500 text-white shadow-lg shadow-amber-900/30'}`}
-                                >
-                                    {saving ? 'Guardando...' : <><Save size={18} /> Guardar Cambios</>}
-                                </button>
-                            </div>
 
-                            {/* Alertas */}
-                            {message && (
-                                <div className={`m-6 p-4 rounded-lg border flex items-center gap-3 animate-in fade-in slide-in-from-top-2 ${message.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400' : 'bg-red-500/10 border-red-500/50 text-red-400'}`}>
-                                    {message.type === 'success' ? <CheckCircle size={20} /> : <AlertCircle size={20} />}
-                                    <span className="font-medium">{message.text}</span>
-                                </div>
-                            )}
-
-                            {/* Lista de Módulos */}
-                            <div className="p-6 space-y-6 overflow-y-auto max-h-[600px] custom-scrollbar">
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    {ALL_MODULES.map((module, idx) => {
-                                        const isAllowed = allowedPaths.includes(module.path)
-                                        return (
-                                            <button
-                                                key={idx}
-                                                onClick={() => togglePath(module.path)}
-                                                className={`flex items-center gap-4 p-4 rounded-xl border transition-all text-left group ${isAllowed
-                                                    ? 'bg-amber-500/5 border-amber-500/30 text-white ring-1 ring-amber-500/10'
-                                                    : 'bg-slate-800/30 border-slate-800 text-slate-500 hover:border-slate-700 hover:bg-slate-800/50'}`}
-                                            >
-                                                <div className={`p-2.5 rounded-lg transition-colors ${isAllowed ? 'bg-amber-500 text-white' : 'bg-slate-800 text-slate-600 group-hover:text-slate-400'}`}>
-                                                    <module.icon size={20} />
-                                                </div>
-                                                <div className="flex-1">
-                                                    <div className="text-xs font-bold uppercase tracking-tighter opacity-50 mb-0.5">{module.label}</div>
-                                                    <div className="font-semibold">{module.name}</div>
-                                                </div>
-                                                <div className={`p-1 rounded-full transition-colors ${isAllowed ? 'text-amber-500' : 'text-slate-700'}`}>
-                                                    {isAllowed ? <Eye size={18} /> : <EyeOff size={18} />}
-                                                </div>
-                                            </button>
-                                        )
-                                    })}
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleRestoreRoleDefaults}
+                                        className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1.5 border border-slate-700 cursor-pointer"
+                                        title="Cargar las vistas recomendadas para su nivel de autoridad"
+                                    >
+                                        <RotateCcw size={14} /> Por Defecto del Rol
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleSelectAll}
+                                        className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1.5 border border-slate-700 cursor-pointer"
+                                    >
+                                        <CheckSquare size={14} /> Todas
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleSave}
+                                        disabled={saving}
+                                        className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black uppercase flex items-center gap-1.5 shadow-lg cursor-pointer disabled:opacity-60"
+                                    >
+                                        <Save size={15} />
+                                        {saving ? 'Sincronizando...' : 'Guardar y Reflejar en APK'}
+                                    </button>
                                 </div>
                             </div>
 
-                            <div className="p-6 bg-slate-950/50 border-t border-slate-800 rounded-b-xl">
-                                <p className="text-xs text-slate-500 flex items-start gap-2 italic">
-                                    <AlertCircle size={14} className="mt-0.5" />
-                                    Nota: Si el usuario tiene el rol 'SUPER_ADMIN', podrá ver todos los módulos independientemente de esta configuración.
-                                    Los cambios surtirán efecto la próxima vez que el usuario inicie sesión o recargue la página.
-                                </p>
+                            {/* Lista de Módulos por Pilar */}
+                            <div className="p-5 space-y-6">
+                                {pillars.map((pillar) => {
+                                    const mods = ALL_SYSTEM_MODULES.filter((m) => m.pillar === pillar)
+                                    return (
+                                        <div key={pillar} className="space-y-2.5">
+                                            <h4 className="text-xs font-black uppercase tracking-wider text-amber-500 border-b border-slate-800 pb-1.5">
+                                                {pillar}
+                                            </h4>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                {mods.map((mod) => {
+                                                    const isChecked =
+                                                        selectedUser.role === 'SUPER_ADMIN' ||
+                                                        allowedPaths.includes(mod.path)
+                                                    const IconComp = mod.icon
+                                                    return (
+                                                        <div
+                                                            key={mod.path}
+                                                            onClick={() => {
+                                                                if (selectedUser.role === 'SUPER_ADMIN') {
+                                                                    toast.info(
+                                                                        'El rol SUPER_ADMIN siempre conserva acceso total por seguridad.'
+                                                                    )
+                                                                    return
+                                                                }
+                                                                togglePath(mod.path)
+                                                            }}
+                                                            className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-start justify-between gap-3 ${
+                                                                isChecked
+                                                                    ? 'bg-emerald-500/10 border-emerald-500/50 shadow-sm'
+                                                                    : 'bg-slate-950/60 border-slate-800 opacity-75 hover:opacity-100'
+                                                            }`}
+                                                        >
+                                                            <div className="flex items-start gap-3 min-w-0">
+                                                                <div
+                                                                    className={`p-2 rounded-xl shrink-0 mt-0.5 ${
+                                                                        isChecked
+                                                                            ? 'bg-emerald-500 text-slate-950'
+                                                                            : 'bg-slate-800 text-slate-400'
+                                                                    }`}
+                                                                >
+                                                                    <IconComp size={16} />
+                                                                </div>
+                                                                <div className="min-w-0">
+                                                                    <div className="text-xs font-black text-white flex items-center gap-1.5 flex-wrap">
+                                                                        <span>{mod.name}</span>
+                                                                        {mod.confidential && (
+                                                                            <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[9px] font-black uppercase flex items-center gap-0.5">
+                                                                                <Lock size={9} /> Sensible
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="text-[11px] font-bold text-amber-400 mt-0.5 flex items-center gap-1">
+                                                                        <Smartphone size={11} /> {mod.apkScreen}
+                                                                    </div>
+                                                                    <div className="text-[10px] text-slate-500 font-mono truncate">
+                                                                        {mod.path}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <div
+                                                                className={`w-11 h-6 rounded-full relative transition-colors shrink-0 mt-1 ${
+                                                                    isChecked ? 'bg-emerald-500' : 'bg-slate-700'
+                                                                }`}
+                                                            >
+                                                                <div
+                                                                    className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${
+                                                                        isChecked ? 'left-6' : 'left-1'
+                                                                    }`}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+                                        </div>
+                                    )
+                                })}
                             </div>
                         </div>
                     ) : (
-                        <div className="bg-slate-900/50 border border-slate-800 border-dashed rounded-xl h-full flex flex-col items-center justify-center p-10 text-center">
-                            <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mb-4 text-slate-600">
-                                <Shield size={40} />
-                            </div>
-                            <h3 className="text-xl font-bold text-slate-400">Seleccione un Usuario</h3>
-                            <p className="text-slate-500 max-w-xs mt-2">Elige un usuario de la lista de la izquierda para comenzar a personalizar sus visiones del sistema.</p>
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400">
+                            Selecciona un usuario a la izquierda para configurar sus vistas en Web y APK Android.
                         </div>
                     )}
                 </div>
-
             </div>
         </div>
     )

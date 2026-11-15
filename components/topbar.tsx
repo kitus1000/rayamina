@@ -1,18 +1,18 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Search, User, ChevronDown, LogOut, Settings, Sparkles, Sun, Moon, Printer } from 'lucide-react'
+import { User, ChevronDown, LogOut, Settings, ShieldCheck, Sun, Moon, Printer, Eye } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
 import { useRouter, usePathname } from 'next/navigation'
 
 export default function Topbar() {
-    const { user, sysRole, sysUserId, signOut, loginAsDemo } = useAuth()
+    const { user, sysRole, sysUserId, fullName, signOut, isViewAllowed } = useAuth()
     const router = useRouter()
     const pathname = usePathname()
     const [isMenuOpen, setIsMenuOpen] = useState(false)
     const menuRef = useRef<HTMLDivElement>(null)
-    const [profile, setProfile] = useState<{ nickname?: string, avatar_url?: string }>({})
+    const [profile, setProfile] = useState<{ nickname?: string; avatar_url?: string }>({})
     const [theme, setTheme] = useState<'light' | 'dark'>('light')
 
     useEffect(() => {
@@ -39,32 +39,112 @@ export default function Topbar() {
         }
     }
 
-    const titleMap: Record<string, { title: string, pillar: string, pillarColor: string }> = {
-        '/dashboard': { title: 'Dashboard Ejecutivo & Financiero', pillar: '🏛️ Jefatura y Dirección', pillarColor: 'bg-amber-500/15 text-amber-500 border-amber-500/30' },
-        '/dashboard/nomina': { title: 'Pre-Nómina y Raya Semanal', pillar: '🏛️ Jefatura y Dirección', pillarColor: 'bg-amber-500/15 text-amber-500 border-amber-500/30' },
-        '/dashboard/nomina/tarifas': { title: 'Matriz Oficial de Tarifas y Destajos', pillar: '📐 Planeación e Ingeniería', pillarColor: 'bg-blue-500/15 text-blue-500 border-blue-500/30' },
-        '/dashboard/semana': { title: 'Planeación Semanal (Metas vs Ejecución)', pillar: '📐 Planeación e Ingeniería', pillarColor: 'bg-blue-500/15 text-blue-500 border-blue-500/30' },
-        '/dashboard/catalogos/ubicaciones': { title: 'Frentes, Rebajes y Ubicaciones', pillar: '📐 Planeación e Ingeniería', pillarColor: 'bg-blue-500/15 text-blue-500 border-blue-500/30' },
-        '/dashboard/catalogos/productos-mina': { title: 'Catálogo de Conceptos y Precios Unitarios', pillar: '📐 Planeación e Ingeniería', pillarColor: 'bg-blue-500/15 text-blue-500 border-blue-500/30' },
-        '/dashboard/catalogos/cuadrillas': { title: 'Pizarra Táctica de Cuadrillas', pillar: '⛏️ Operación Mina', pillarColor: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30' },
-        '/dashboard/catalogos/empleados': { title: 'Fuerza Operativa y Mineros', pillar: '⛏️ Operación Mina', pillarColor: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30' },
-        '/dashboard/catalogos/equipos': { title: 'Flota de Equipos (Scooptrams / Jumbos / Camiones)', pillar: '⛏️ Operación Mina', pillarColor: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30' },
-        '/dashboard/operacion/reportes-diarios': { title: 'Central de Reportes Diarios e Incidencias', pillar: '📋 Reportes y Seguridad', pillarColor: 'bg-rose-500/15 text-rose-500 border-rose-500/30' },
-        '/dashboard/operacion/reportes-diarios/nuevo': { title: 'Captura de Reporte Diario de Turno', pillar: '📋 Reportes y Seguridad', pillarColor: 'bg-rose-500/15 text-rose-500 border-rose-500/30' },
-        '/dashboard/chat': { title: 'Bitácora Operativa y Blog de Tareas', pillar: '📋 Reportes y Seguridad', pillarColor: 'bg-rose-500/15 text-rose-500 border-rose-500/30' },
-        '/dashboard/catalogos': { title: 'Catálogos Maestros de Operación', pillar: '⚙️ Sistema y Catálogos', pillarColor: 'bg-purple-500/15 text-purple-500 border-purple-500/30' },
-        '/dashboard/catalogos/minas': { title: 'Unidades Mineras', pillar: '⚙️ Sistema y Catálogos', pillarColor: 'bg-purple-500/15 text-purple-500 border-purple-500/30' },
-        '/dashboard/catalogos/puestos-roles': { title: 'Puestos Oficiales, Roles y Splits', pillar: '⚙️ Sistema y Catálogos', pillarColor: 'bg-purple-500/15 text-purple-500 border-purple-500/30' },
-        '/dashboard/configuracion': { title: 'Reglas y Configuración del Sistema', pillar: '⚙️ Sistema y Catálogos', pillarColor: 'bg-purple-500/15 text-purple-500 border-purple-500/30' },
-        '/dashboard/configuracion/visiones': { title: 'Permisos y Visiones Jerárquicas', pillar: '⚙️ Sistema y Catálogos', pillarColor: 'bg-purple-500/15 text-purple-500 border-purple-500/30' },
-        '/dashboard/configuracion/usuarios': { title: 'Control de Usuarios y Accesos', pillar: '⚙️ Sistema y Catálogos', pillarColor: 'bg-purple-500/15 text-purple-500 border-purple-500/30' }
+    const titleMap: Record<string, { title: string; pillar: string; pillarColor: string }> = {
+        '/dashboard': {
+            title: 'Dashboard Ejecutivo & Financiero',
+            pillar: '🏛️ Jefatura y Dirección',
+            pillarColor: 'bg-amber-500/15 text-amber-500 border-amber-500/30',
+        },
+        '/dashboard/nomina': {
+            title: 'Pre-Nómina y Raya Semanal',
+            pillar: '🏛️ Jefatura y Dirección',
+            pillarColor: 'bg-amber-500/15 text-amber-500 border-amber-500/30',
+        },
+        '/dashboard/nomina/tarifas': {
+            title: 'Matriz Oficial de Tarifas y Destajos',
+            pillar: '📐 Planeación e Ingeniería',
+            pillarColor: 'bg-blue-500/15 text-blue-500 border-blue-500/30',
+        },
+        '/dashboard/semana': {
+            title: 'Planeación Semanal (Metas vs Ejecución)',
+            pillar: '📐 Planeación e Ingeniería',
+            pillarColor: 'bg-blue-500/15 text-blue-500 border-blue-500/30',
+        },
+        '/dashboard/catalogos/ubicaciones': {
+            title: 'Frentes, Rebajes y Ubicaciones',
+            pillar: '📐 Planeación e Ingeniería',
+            pillarColor: 'bg-blue-500/15 text-blue-500 border-blue-500/30',
+        },
+        '/dashboard/catalogos/productos-mina': {
+            title: 'Catálogo de Conceptos y Precios Unitarios',
+            pillar: '📐 Planeación e Ingeniería',
+            pillarColor: 'bg-blue-500/15 text-blue-500 border-blue-500/30',
+        },
+        '/dashboard/catalogos/cuadrillas': {
+            title: 'Pizarra Táctica de Cuadrillas',
+            pillar: '⛏️ Operación Mina',
+            pillarColor: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
+        },
+        '/dashboard/catalogos/empleados': {
+            title: 'Fuerza Operativa y Mineros',
+            pillar: '⛏️ Operación Mina',
+            pillarColor: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
+        },
+        '/dashboard/catalogos/equipos': {
+            title: 'Flota de Equipos (Scooptrams / Jumbos / Camiones)',
+            pillar: '⛏️ Operación Mina',
+            pillarColor: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
+        },
+        '/dashboard/operacion/reportes-diarios': {
+            title: 'Central de Reportes Diarios e Incidencias',
+            pillar: '📋 Reportes y Seguridad',
+            pillarColor: 'bg-rose-500/15 text-rose-500 border-rose-500/30',
+        },
+        '/dashboard/operacion/reportes-diarios/nuevo': {
+            title: 'Captura de Reporte Diario de Turno',
+            pillar: '📋 Reportes y Seguridad',
+            pillarColor: 'bg-rose-500/15 text-rose-500 border-rose-500/30',
+        },
+        '/dashboard/chat': {
+            title: 'Bitácora Operativa y Blog de Tareas',
+            pillar: '📋 Reportes y Seguridad',
+            pillarColor: 'bg-rose-500/15 text-rose-500 border-rose-500/30',
+        },
+        '/dashboard/catalogos': {
+            title: 'Catálogos Maestros de Operación',
+            pillar: '⚙️ Sistema y Catálogos',
+            pillarColor: 'bg-purple-500/15 text-purple-500 border-purple-500/30',
+        },
+        '/dashboard/catalogos/minas': {
+            title: 'Unidades Mineras',
+            pillar: '⚙️ Sistema y Catálogos',
+            pillarColor: 'bg-purple-500/15 text-purple-500 border-purple-500/30',
+        },
+        '/dashboard/catalogos/puestos-roles': {
+            title: 'Puestos Oficiales, Roles y Splits',
+            pillar: '⚙️ Sistema y Catálogos',
+            pillarColor: 'bg-purple-500/15 text-purple-500 border-purple-500/30',
+        },
+        '/dashboard/configuracion': {
+            title: 'Reglas y Configuración del Sistema',
+            pillar: '⚙️ Sistema y Catálogos',
+            pillarColor: 'bg-purple-500/15 text-purple-500 border-purple-500/30',
+        },
+        '/dashboard/configuracion/visiones': {
+            title: 'Permisos y Visiones (Web + APK Android)',
+            pillar: '⚙️ Sistema y Catálogos',
+            pillarColor: 'bg-purple-500/15 text-purple-500 border-purple-500/30',
+        },
+        '/dashboard/configuracion/usuarios': {
+            title: 'Control de Usuarios y Accesos',
+            pillar: '⚙️ Sistema y Catálogos',
+            pillarColor: 'bg-purple-500/15 text-purple-500 border-purple-500/30',
+        },
     }
 
-    const currentMeta = titleMap[pathname] || (
-        pathname.includes('/reportes-diarios/')
-            ? { title: 'Expediente de Reporte Diario', pillar: '📋 Reportes y Seguridad', pillarColor: 'bg-rose-500/15 text-rose-500 border-rose-500/30' }
-            : { title: 'Panel de Control Operativo', pillar: '⛏️ Operación Mina', pillarColor: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30' }
-    )
+    const currentMeta =
+        titleMap[pathname] ||
+        (pathname.includes('/reportes-diarios/')
+            ? {
+                  title: 'Expediente de Reporte Diario',
+                  pillar: '📋 Reportes y Seguridad',
+                  pillarColor: 'bg-rose-500/15 text-rose-500 border-rose-500/30',
+              }
+            : {
+                  title: 'Panel de Control Operativo',
+                  pillar: '⛏️ Operación Mina',
+                  pillarColor: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
+              })
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -77,8 +157,9 @@ export default function Topbar() {
     }, [])
 
     useEffect(() => {
-        if (sysUserId && !sysUserId.startsWith('demo-')) {
-            supabase.from('sys_users')
+        if (sysUserId) {
+            supabase
+                .from('sys_users')
                 .select('nickname, avatar_url')
                 .eq('id', sysUserId)
                 .maybeSingle()
@@ -94,48 +175,41 @@ export default function Topbar() {
 
     return (
         <header className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between pl-16 pr-3 md:px-6 z-30 sticky top-0 shadow-sm html2pdf__ignore">
-            {/* Left: Dynamic Pillar Badge, Title & Role Switcher */}
+            {/* Left: Dynamic Pillar Badge, Title & Verified Role Badge */}
             <div className="flex items-center gap-2 md:gap-3 min-w-0">
-                <span className={`hidden lg:inline-flex items-center px-2.5 py-1 text-[11px] font-black uppercase tracking-wider rounded-lg border shrink-0 ${currentMeta.pillarColor}`}>
+                <span
+                    className={`hidden lg:inline-flex items-center px-2.5 py-1 text-[11px] font-black uppercase tracking-wider rounded-lg border shrink-0 ${currentMeta.pillarColor}`}
+                >
                     {currentMeta.pillar}
                 </span>
-                <h2 className="text-sm sm:text-base md:text-lg font-black text-white tracking-tight truncate">{currentMeta.title}</h2>
+                <h2 className="text-sm sm:text-base md:text-lg font-black text-white tracking-tight truncate">
+                    {currentMeta.title}
+                </h2>
                 <span className="hidden xl:inline-flex px-2.5 py-0.5 bg-amber-500/15 text-amber-400 text-xs font-bold rounded-full border border-amber-500/30 shrink-0">
                     Semana 38 (21-27 Sep)
                 </span>
 
-                {/* Selector de Jerarquía / Rol en Vivo */}
-                <div className="hidden sm:flex items-center gap-1.5 bg-slate-950/90 border border-indigo-500/40 rounded-xl px-2.5 py-1 shadow-sm shrink-0">
-                    <Sparkles size={13} className="text-indigo-400 shrink-0" />
-                    <span className="text-[10px] font-black text-indigo-400 uppercase hidden md:inline">Rol Activo:</span>
-                    <select
-                        value={sysRole || 'SUPER_ADMIN'}
-                        onChange={e => {
-                            loginAsDemo(e.target.value)
-                        }}
-                        className="bg-transparent text-white text-xs font-bold outline-none cursor-pointer !border-0 !p-0 !shadow-none"
-                    >
-                        <option value="SUPER_ADMIN">👑 Super Admin (Total)</option>
-                        <option value="DIRECTOR_OPERATIVO">🏛️ Director Operativo (Finanzas & KPI)</option>
-                        <option value="GERENTE">⭐ Gerente Operaciones (Jefatura)</option>
-                        <option value="SUPERINTENDENTE">⛏️ Superintendente (Mueve Cuadrillas)</option>
-                        <option value="JEFE_PLANEACION">📐 Jefe Planeación (Metas & Cubicación)</option>
-                        <option value="SUPERVISOR">📋 Supervisor (Reportes & Seguridad)</option>
-                    </select>
+                {/* Insignia de Rol Verificado (Solo Lectura) */}
+                <div className="hidden sm:flex items-center gap-1.5 bg-slate-950/90 border border-emerald-500/40 rounded-xl px-2.5 py-1 shadow-sm shrink-0">
+                    <ShieldCheck size={13} className="text-emerald-400 shrink-0" />
+                    <span className="text-[10px] font-black text-emerald-400 uppercase">
+                        {sysRole ? sysRole.replace(/_/g, ' ') : 'VERIFICADO'}
+                    </span>
                 </div>
             </div>
 
-            {/* Right: Mobile App Mode, PDF Export, Theme Toggle (Modo Día / Noche), Profile */}
+            {/* Right: Configurar Visiones (si es Admin), PDF Export, Theme Toggle, Profile */}
             <div className="flex items-center gap-2 shrink-0">
-                {/* Botón Directo a Versión App Celular Android */}
-                <button
-                    onClick={() => router.push('/mobile')}
-                    title="Abrir Interfaz App Celular Android (Sin Expo Go)"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black transition-all shadow-sm cursor-pointer"
-                >
-                    <span>📱</span>
-                    <span className="hidden sm:inline">App Android</span>
-                </button>
+                {isViewAllowed('/dashboard/configuracion/visiones') && (
+                    <button
+                        onClick={() => router.push('/dashboard/configuracion/visiones')}
+                        title="Configurar qué vistas ve cada usuario en Web y en el APK Android"
+                        className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 text-xs font-black transition-all shadow-sm cursor-pointer"
+                    >
+                        <Eye size={14} />
+                        <span>Vistas APK / Web</span>
+                    </button>
+                )}
 
                 {/* Botón Universal Exportar a PDF */}
                 <button
@@ -177,8 +251,12 @@ export default function Topbar() {
                         className="flex items-center gap-2.5 text-left hover:bg-slate-800/50 p-1.5 rounded-xl transition-colors"
                     >
                         <div className="text-right hidden sm:block">
-                            <p className="text-xs font-bold text-white leading-tight">{profile.nickname || user?.email?.split('@')[0] || 'Mando Activo'}</p>
-                            <p className="text-[10px] text-slate-500 font-bold uppercase">{sysRole ? sysRole.replace('_', ' ') : 'Cargando...'}</p>
+                            <p className="text-xs font-bold text-white leading-tight">
+                                {profile.nickname || fullName || user?.email?.split('@')[0] || 'Usuario'}
+                            </p>
+                            <p className="text-[10px] text-slate-500 font-bold uppercase">
+                                {sysRole ? sysRole.replace(/_/g, ' ') : 'Autenticado'}
+                            </p>
                         </div>
                         <div className="w-8 h-8 bg-slate-800 rounded-full flex items-center justify-center border border-slate-700 overflow-hidden">
                             {profile.avatar_url ? (
@@ -187,12 +265,14 @@ export default function Topbar() {
                                 <User size={16} className="text-slate-400" />
                             )}
                         </div>
-                        <ChevronDown size={14} className={`text-slate-500 transition-transform ${isMenuOpen ? 'rotate-180' : ''}`} />
+                        <ChevronDown
+                            size={14}
+                            className={`text-slate-500 transition-transform ${isMenuOpen ? 'rotate-180' : ''}`}
+                        />
                     </button>
 
-                    {/* Dropdown Menu */}
                     {isMenuOpen && (
-                        <div className="absolute right-0 mt-2 w-48 bg-slate-900 rounded-xl shadow-xl border border-slate-700 overflow-hidden z-50">
+                        <div className="absolute right-0 mt-2 w-52 bg-slate-900 rounded-xl shadow-xl border border-slate-700 overflow-hidden z-50">
                             <div className="p-2">
                                 <button
                                     onClick={() => {

@@ -7,6 +7,7 @@ import Sidebar from '@/components/sidebar'
 import Topbar from '@/components/topbar'
 import AnimatedBackground from '@/components/animated-background'
 import { motion, AnimatePresence } from 'framer-motion'
+import { ShieldAlert, ArrowRight, RefreshCw } from 'lucide-react'
 import AuthPage from '../login/page'
 
 export default function DashboardLayout({
@@ -14,7 +15,14 @@ export default function DashboardLayout({
 }: {
     children: React.ReactNode
 }) {
-    const { user, loading, sysRole, allowedViews } = useAuth()
+    const {
+        user,
+        loading,
+        sysRole,
+        isViewAllowed,
+        getFirstAllowedPath,
+        refreshUserConfig,
+    } = useAuth()
     const router = useRouter()
     const pathname = usePathname()
     const [routeChanging, setRouteChanging] = useState(false)
@@ -41,38 +49,27 @@ export default function DashboardLayout({
         return () => clearTimeout(timer)
     }, [pathname])
 
+    const isAuthorized = !loading && user ? isViewAllowed(pathname) : false
+
+    // Redirección automática si el usuario entra a una vista no autorizada (ej. Supervisor entrando a /dashboard financiero)
     useEffect(() => {
-        if (!loading && user && pathname !== '/dashboard' && pathname !== '/login') {
-            if (
-                sysRole === 'SUPER_ADMIN' ||
-                sysRole === 'DIRECTOR_OPERATIVO' ||
-                sysRole === 'GERENTE' ||
-                sysRole === 'SUPERINTENDENTE' ||
-                sysRole === 'JEFE_PLANEACION'
-            ) {
-                return
-            }
-
-            if (!allowedViews || allowedViews.length === 0) {
-                return
-            }
-
-            const isAllowed = allowedViews.some(av => {
-                if (pathname === av) return true
-                if (av !== '/dashboard' && pathname.startsWith(av + '/')) return true
-                return false
-            })
-
-            if (!isAllowed) {
-                router.replace('/dashboard')
+        if (!loading && user && pathname !== '/login') {
+            if (!isViewAllowed(pathname)) {
+                const target = getFirstAllowedPath()
+                if (target && target !== pathname) {
+                    router.replace(target)
+                }
             }
         }
-    }, [pathname, loading, user, sysRole, allowedViews, router])
+    }, [pathname, loading, user, isViewAllowed, getFirstAllowedPath, router])
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-slate-950">
+            <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 gap-3">
                 <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-amber-500"></div>
+                <p className="text-xs font-black uppercase tracking-widest text-amber-500">
+                    Verificando Credencial y Vistas Autorizadas...
+                </p>
             </div>
         )
     }
@@ -82,29 +79,9 @@ export default function DashboardLayout({
     }
 
     if (user && pathname === '/login') {
-        router.push('/dashboard')
+        router.replace(getFirstAllowedPath())
         return null
     }
-
-    const isAuthorized = (() => {
-        if (pathname === '/dashboard' || pathname === '/login') return true
-        if (
-            sysRole === 'SUPER_ADMIN' ||
-            sysRole === 'DIRECTOR_OPERATIVO' ||
-            sysRole === 'GERENTE' ||
-            sysRole === 'SUPERINTENDENTE' ||
-            sysRole === 'JEFE_PLANEACION' ||
-            !allowedViews ||
-            allowedViews.length === 0
-        ) {
-            return true
-        }
-        return allowedViews.some(av => {
-            if (pathname === av) return true
-            if (av !== '/dashboard' && pathname.startsWith(av + '/')) return true
-            return false
-        })
-    })()
 
     return (
         <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
@@ -130,7 +107,7 @@ export default function DashboardLayout({
                 <main className="flex-1 overflow-auto p-4 md:p-6 pb-24 md:pb-6 relative">
                     <AnimatedBackground />
 
-                    {/* Membrete Oficial para Exportación PDF / Impresión (Visible en todos los PDFs) */}
+                    {/* Membrete Oficial para Exportación PDF / Impresión */}
                     <div className="hidden print-only-block mb-6 pb-4 border-b-2 border-slate-800">
                         <div className="flex items-center justify-between">
                             <div>
@@ -142,22 +119,67 @@ export default function DashboardLayout({
                                 </p>
                             </div>
                             <div className="text-right text-xs text-slate-700 font-mono">
-                                <div><strong>Fecha Impresión:</strong> {new Date().toLocaleDateString('es-MX')} {new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}</div>
-                                <div><strong>Nivel de Mando:</strong> {sysRole || 'DIRECCIÓN'}</div>
-                                <div><strong>Módulo:</strong> {pathname}</div>
+                                <div>
+                                    <strong>Fecha Impresión:</strong>{' '}
+                                    {new Date().toLocaleDateString('es-MX')}{' '}
+                                    {new Date().toLocaleTimeString('es-MX', {
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                    })}
+                                </div>
+                                <div>
+                                    <strong>Nivel de Mando:</strong> {sysRole || 'AUTORIZADO'}
+                                </div>
+                                <div>
+                                    <strong>Módulo:</strong> {pathname}
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    {/* Contenido con plantilla de animación y validación de autorización */}
+                    {/* Contenido con animación de transición y validación estricta de vistas */}
                     <div className="relative z-10">
-                        {isAuthorized ? children : (
-                            <div className="flex flex-col items-center justify-center h-full mt-20 text-center bg-slate-900 border border-slate-800 rounded-2xl p-10 max-w-lg mx-auto shadow-xl">
-                                <div className="text-amber-500 mb-4 text-6xl">⚠️</div>
-                                <h1 className="text-2xl font-bold text-white mb-2">Acceso Restringido por Nivel Jerárquico</h1>
-                                <p className="text-slate-400">Tu perfil actual ({sysRole}) no cuenta con permisos para modificar o consultar esta sección.</p>
-                            </div>
-                        )}
+                        <AnimatePresence mode="wait">
+                            <motion.div
+                                key={pathname}
+                                initial={{ opacity: 0, y: 12 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -8 }}
+                                transition={{ duration: 0.25, ease: 'easeOut' }}
+                            >
+                                {isAuthorized ? (
+                                    children
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center mt-16 text-center bg-slate-900 border border-rose-500/40 rounded-2xl p-8 max-w-lg mx-auto shadow-2xl">
+                                        <div className="w-16 h-16 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-500 mb-4">
+                                            <ShieldAlert size={34} />
+                                        </div>
+                                        <h1 className="text-xl font-black text-white mb-2">
+                                            Vista Restringida por Configuración de Seguridad
+                                        </h1>
+                                        <p className="text-sm text-slate-400 leading-relaxed mb-6">
+                                            Tu usuario (<span className="font-bold text-amber-500">{user?.email}</span> • Rol:{' '}
+                                            <span className="font-bold text-white">{sysRole}</span>) no tiene habilitada esta vista en el módulo de{' '}
+                                            <strong>Gestión de Visiones</strong>. Los datos de precios unitarios, tonelaje y nómina están protegidos.
+                                        </p>
+                                        <div className="flex flex-wrap items-center justify-center gap-3">
+                                            <button
+                                                onClick={() => router.replace(getFirstAllowedPath())}
+                                                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black uppercase flex items-center gap-1.5 shadow-lg cursor-pointer"
+                                            >
+                                                Ir a mi Vista Autorizada <ArrowRight size={15} />
+                                            </button>
+                                            <button
+                                                onClick={() => refreshUserConfig()}
+                                                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1.5 border border-slate-700 cursor-pointer"
+                                            >
+                                                <RefreshCw size={14} /> Sincronizar Permisos
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </motion.div>
+                        </AnimatePresence>
                     </div>
 
                     {/* Pie de Firmas Oficiales para Exportación PDF */}
