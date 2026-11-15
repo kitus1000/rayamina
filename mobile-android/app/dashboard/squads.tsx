@@ -1,0 +1,964 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react'
+import {
+    View,
+    Text,
+    TouchableOpacity,
+    ScrollView,
+    ActivityIndicator,
+    Modal,
+    Alert,
+    Animated,
+    StyleSheet,
+} from 'react-native'
+import {
+    Users,
+    Pickaxe,
+    Shield,
+    Truck,
+    ArrowRightLeft,
+    History,
+    Lock,
+    CheckCircle2,
+    UserPlus,
+    UserMinus,
+    X,
+} from 'lucide-react-native'
+import { supabase } from '../../lib/supabase'
+import { useMobileAuth } from '../../lib/auth-context'
+import MobileShell from '../../components/MobileShell'
+
+const SQUAD_HISTORY_KEY = 'ops_squad_history_store'
+
+export default function MobileSquadsScreen() {
+    const { sysRole, user, theme, canMoveSquads } = useMobileAuth()
+    const [loading, setLoading] = useState(true)
+    const [cuadrillas, setCuadrillas] = useState<any[]>([])
+    const [selectedSquadId, setSelectedSquadId] = useState<string>('')
+    const [membersBySquad, setMembersBySquad] = useState<Record<string, any[]>>({})
+    const [benchEmployees, setBenchEmployees] = useState<any[]>([])
+    const [historyLog, setHistoryLog] = useState<Record<string, any>>({})
+
+    // Modal de Transferencia Táctica
+    const [selectedWorker, setSelectedWorker] = useState<any | null>(null)
+    const [transferAnim] = useState(new Animated.Value(0))
+    const [transferringTo, setTransferringTo] = useState<string | null>(null)
+
+    const isLight = theme === 'light'
+    const bgCard = isLight ? '#FFFFFF' : '#0F172A'
+    const bgPitch = isLight ? '#064E3B' : '#022C22'
+    const borderCol = isLight ? '#CBD5E1' : '#1E293B'
+    const textPrimary = isLight ? '#0F172A' : '#F8FAFC'
+    const textSecondary = isLight ? '#475569' : '#94A3B8'
+
+    const classifySpecialty = (puesto: string, rol: string) => {
+        const combined = `${puesto} ${rol}`.toUpperCase()
+        if (combined.includes('SCOOP') || combined.includes('CARGADOR') || combined.includes('CAMION')) {
+            return {
+                code: 'SCOOP',
+                label: '🚜 OPERADOR SCOOP',
+                bg: '#F59E0B',
+                text: '#0F172A',
+                animText: '🚜 Desplazando Operador de Scooptram...',
+            }
+        }
+        if (combined.includes('AYUDANTE')) {
+            return {
+                code: 'AYUDANTE',
+                label: '🛡️ AYUDANTE PERF.',
+                bg: '#06B6D4',
+                text: '#0F172A',
+                animText: '🛡️ Reubicando Ayudante de Perforista...',
+            }
+        }
+        if (
+            combined.includes('PERFORISTA') ||
+            combined.includes('JUMBO') ||
+            combined.includes('STOPPER') ||
+            combined.includes('BARRENADOR')
+        ) {
+            return {
+                code: 'PERFORISTA',
+                label: '⛏️ PERFORISTA',
+                bg: '#F43F5E',
+                text: '#FFFFFF',
+                animText: '⛏️ Perforando cambio de frente...',
+            }
+        }
+        return {
+            code: 'GENERAL',
+            label: '🔧 SERVICIOS MINA',
+            bg: '#10B981',
+            text: '#0F172A',
+            animText: '⛏️ Moviendo personal operativo...',
+        }
+    }
+
+    const loadSquadsData = useCallback(async () => {
+        setLoading(true)
+        try {
+            const [
+                { data: sqData },
+                { data: memData },
+                { data: empData },
+                { data: histData },
+            ] = await Promise.all([
+                supabase
+                    .from('cat_cuadrillas')
+                    .select('id, nombre, codigo, activo, cat_turnos(nombre, codigo), mine_sites(nombre_mina)')
+                    .eq('activo', true)
+                    .order('nombre'),
+                supabase
+                    .from('cat_cuadrillas_miembros')
+                    .select('id, cuadrilla_id, empleado_id, rol_operativo_id, activo'),
+                supabase
+                    .from('rh_employees')
+                    .select('id, employee_code, first_name, last_name, status, cat_puestos(nombre), cat_roles_operativos(nombre)')
+                    .order('first_name'),
+                supabase
+                    .from('sys_config')
+                    .select('value_json')
+                    .eq('key_name', SQUAD_HISTORY_KEY)
+                    .maybeSingle(),
+            ])
+
+            const activeSquads = sqData || []
+            setCuadrillas(activeSquads)
+            if (activeSquads.length > 0 && !selectedSquadId) {
+                setSelectedSquadId(activeSquads[0].id)
+            }
+
+            const hMap =
+                histData?.value_json && typeof histData.value_json === 'object'
+                    ? (histData.value_json as Record<string, any>)
+                    : {}
+            setHistoryLog(hMap)
+
+            const empMap = new Map<string, any>()
+            ;(empData || []).forEach((e: any) => {
+                if (e.status !== 'INACTIVE') {
+                    const puesto = Array.isArray(e.cat_puestos)
+                        ? e.cat_puestos[0]?.nombre
+                        : e.cat_puestos?.nombre || 'Operador'
+                    const rol = Array.isArray(e.cat_roles_operativos)
+                        ? e.cat_roles_operativos[0]?.nombre
+                        : e.cat_roles_operativos?.nombre || puesto
+                    empMap.set(e.id, {
+                        ...e,
+                        fullName: `${e.first_name || ''} ${e.last_name || ''}`.trim(),
+                        puestoNombre: puesto,
+                        rolNombre: rol,
+                        specialty: classifySpecialty(puesto, rol),
+                    })
+                }
+            })
+
+            const assignedSet = new Set<string>()
+            const grouped: Record<string, any[]> = {}
+            activeSquads.forEach((s: any) => {
+                grouped[s.id] = []
+            })
+
+            ;(memData || []).forEach((m: any) => {
+                if (m.activo === false) return
+                const emp = empMap.get(m.empleado_id)
+                if (emp && grouped[m.cuadrilla_id] && !assignedSet.has(m.empleado_id)) {
+                    assignedSet.add(m.empleado_id)
+                    grouped[m.cuadrilla_id].push(emp)
+                }
+            })
+
+            const bench: any[] = []
+            empMap.forEach((emp, id) => {
+                if (!assignedSet.has(id)) {
+                    bench.push(emp)
+                }
+            })
+
+            setMembersBySquad(grouped)
+            setBenchEmployees(bench)
+        } catch (e) {
+            console.warn('Error cargando cuadrillas móviles:', e)
+        } finally {
+            setLoading(false)
+        }
+    }, [selectedSquadId])
+
+    useEffect(() => {
+        loadSquadsData()
+    }, [loadSquadsData])
+
+    const handleMoveWorker = async (worker: any, targetSquadId: string | 'BENCH') => {
+        if (!canMoveSquads) {
+            Alert.alert(
+                'Permiso Restringido',
+                'Por regla jerárquica, solo el Superintendente y el Gerente pueden mover personal entre cuadrillas.'
+            )
+            return
+        }
+
+        const currentSquadObj = cuadrillas.find((c) =>
+            (membersBySquad[c.id] || []).some((m) => m.id === worker.id)
+        )
+        const targetSquadObj =
+            targetSquadId === 'BENCH'
+                ? { nombre: 'Banca / Reserva' }
+                : cuadrillas.find((c) => c.id === targetSquadId)
+
+        setTransferringTo(targetSquadObj?.nombre || 'Destino')
+        transferAnim.setValue(0)
+
+        Animated.timing(transferAnim, {
+            toValue: 1,
+            duration: 650,
+            useNativeDriver: true,
+        }).start(async () => {
+            try {
+                // 1. Eliminar asignación previa para garantizar 0 duplicados
+                await supabase
+                    .from('cat_cuadrillas_miembros')
+                    .delete()
+                    .eq('empleado_id', worker.id)
+
+                // 2. Si va a una cuadrilla activa, insertarlo
+                if (targetSquadId !== 'BENCH') {
+                    await supabase.from('cat_cuadrillas_miembros').insert([
+                        {
+                            cuadrilla_id: targetSquadId,
+                            empleado_id: worker.id,
+                            activo: true,
+                        },
+                    ])
+                }
+
+                // 3. Guardar historial semanal de cuadrilla anterior
+                const updatedHistory = {
+                    ...historyLog,
+                    [worker.id]: {
+                        previousSquad: currentSquadObj?.nombre || 'Reserva',
+                        currentSquad: targetSquadObj?.nombre || 'Reserva',
+                        movedBy: user?.nickname || sysRole,
+                        week: 'Semana 38 (21-27 Sep 2026)',
+                        updatedAt: new Date().toISOString(),
+                    },
+                }
+                setHistoryLog(updatedHistory)
+
+                await supabase.from('sys_config').upsert(
+                    {
+                        key_name: SQUAD_HISTORY_KEY,
+                        value_json: updatedHistory,
+                        description: 'Historial semanal de movimientos de cuadrillas',
+                    },
+                    { onConflict: 'key_name' }
+                )
+
+                setSelectedWorker(null)
+                setTransferringTo(null)
+                await loadSquadsData()
+            } catch (err: any) {
+                setTransferringTo(null)
+                Alert.alert('Error', err?.message || 'No se pudo completar el movimiento.')
+            }
+        })
+    }
+
+    const activeSquad = cuadrillas.find((c) => c.id === selectedSquadId) || cuadrillas[0]
+    const currentMembers = activeSquad ? membersBySquad[activeSquad.id] || [] : []
+
+    return (
+        <MobileShell
+            title="Pizarra Táctica de Cuadrillas"
+            pillar="3. Operación Mina (Campo)"
+            pillarHex="#10B981"
+        >
+            <ScrollView
+                style={styles.scroll}
+                contentContainerStyle={{ paddingBottom: 36 }}
+                showsVerticalScrollIndicator={false}
+            >
+                {/* BANNER DE REGLA JERÁRQUICA */}
+                <View
+                    style={[
+                        styles.ruleBanner,
+                        {
+                            backgroundColor: canMoveSquads ? '#10B98118' : '#F59E0B18',
+                            borderColor: canMoveSquads ? '#10B981' : '#F59E0B',
+                        },
+                    ]}
+                >
+                    {canMoveSquads ? (
+                        <CheckCircle2 size={18} color="#10B981" />
+                    ) : (
+                        <Lock size={18} color="#D97706" />
+                    )}
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={[styles.ruleTitle, { color: textPrimary }]}>
+                            {canMoveSquads
+                                ? `Modo Táctico Activo (${sysRole}): Toca cualquier minero para moverlo de cuadrilla`
+                                : `Modo Consulta (${sysRole}): Solo Superintendente y Gerente pueden mover cuadrillas`}
+                        </Text>
+                        <Text style={[styles.ruleSub, { color: textSecondary }]}>
+                            Regla anti-duplicados activa • Historial Semanal Semana 38 sincronizado
+                        </Text>
+                    </View>
+                </View>
+
+                {/* SELECTOR HORIZONTAL DE LAS 5 CUADRILLAS */}
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.squadTabsScroll}
+                >
+                    {cuadrillas.map((sq) => {
+                        const isSelected = activeSquad?.id === sq.id
+                        const count = (membersBySquad[sq.id] || []).length
+                        return (
+                            <TouchableOpacity
+                                key={sq.id}
+                                onPress={() => setSelectedSquadId(sq.id)}
+                                style={[
+                                    styles.squadTab,
+                                    {
+                                        backgroundColor: isSelected ? '#10B981' : bgCard,
+                                        borderColor: isSelected ? '#059669' : borderCol,
+                                    },
+                                ]}
+                            >
+                                <Text
+                                    style={[
+                                        styles.squadTabName,
+                                        { color: isSelected ? '#022C22' : textPrimary },
+                                    ]}
+                                >
+                                    {sq.nombre}
+                                </Text>
+                                <View
+                                    style={[
+                                        styles.squadCountPill,
+                                        {
+                                            backgroundColor: isSelected
+                                                ? '#022C22'
+                                                : '#10B98120',
+                                        },
+                                    ]}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.squadCountText,
+                                            { color: isSelected ? '#34D399' : '#10B981' },
+                                        ]}
+                                    >
+                                        {count} mineros
+                                    </Text>
+                                </View>
+                            </TouchableOpacity>
+                        )
+                    })}
+                </ScrollView>
+
+                {loading ? (
+                    <View style={{ paddingVertical: 50, alignItems: 'center' }}>
+                        <ActivityIndicator size="large" color="#10B981" />
+                        <Text style={{ color: textSecondary, marginTop: 10, fontWeight: '700' }}>
+                            Cargando formación táctica de Semana 38...
+                        </Text>
+                    </View>
+                ) : (
+                    <>
+                        {/* CANCHA TÁCTICA DE LA CUADRILLA SELECCIONADA */}
+                        <View style={[styles.pitchContainer, { backgroundColor: bgPitch }]}>
+                            {/* Líneas de Cancha */}
+                            <View style={styles.pitchHeader}>
+                                <View>
+                                    <Text style={styles.pitchTitle}>
+                                        ⚽ CANCHA TÁCTICA: {activeSquad?.nombre || 'CUADRILLA'}
+                                    </Text>
+                                    <Text style={styles.pitchSub}>
+                                        Semana 38 • {currentMembers.length} Integrantes Asignados
+                                    </Text>
+                                </View>
+                                <View style={styles.pitchBadge}>
+                                    <Text style={styles.pitchBadgeText}>EN TURNO</Text>
+                                </View>
+                            </View>
+
+                            {currentMembers.length === 0 ? (
+                                <View style={styles.emptyPitch}>
+                                    <Text style={styles.emptyPitchText}>
+                                        Sin jugadores asignados en esta cuadrilla.
+                                    </Text>
+                                </View>
+                            ) : (
+                                <View style={styles.playersGrid}>
+                                    {currentMembers.map((emp: any) => {
+                                        const hist = historyLog[emp.id]
+                                        return (
+                                            <TouchableOpacity
+                                                key={emp.id}
+                                                onPress={() => setSelectedWorker(emp)}
+                                                activeOpacity={0.85}
+                                                style={styles.playerCard}
+                                            >
+                                                {/* Etiqueta de Especialidad Animada (Perforista / Ayudante / Scoop) */}
+                                                <View
+                                                    style={[
+                                                        styles.specialtyPill,
+                                                        { backgroundColor: emp.specialty.bg },
+                                                    ]}
+                                                >
+                                                    <Text
+                                                        style={[
+                                                            styles.specialtyText,
+                                                            { color: emp.specialty.text },
+                                                        ]}
+                                                    >
+                                                        {emp.specialty.label}
+                                                    </Text>
+                                                </View>
+
+                                                <Text style={styles.playerName} numberOfLines={2}>
+                                                    {emp.fullName}
+                                                </Text>
+                                                <Text style={styles.playerPuesto} numberOfLines={1}>
+                                                    {emp.puestoNombre}
+                                                </Text>
+
+                                                {hist?.previousSquad && (
+                                                    <View style={styles.historyTag}>
+                                                        <History size={10} color="#FBBF24" />
+                                                        <Text
+                                                            style={styles.historyTagText}
+                                                            numberOfLines={1}
+                                                        >
+                                                            Ant: {hist.previousSquad}
+                                                        </Text>
+                                                    </View>
+                                                )}
+                                            </TouchableOpacity>
+                                        )
+                                    })}
+                                </View>
+                            )}
+                        </View>
+
+                        {/* BANCA DE RESERVA / PERSONAL DISPONIBLE PARA INSERTAR */}
+                        <View
+                            style={[
+                                styles.benchSection,
+                                { backgroundColor: bgCard, borderColor: borderCol },
+                            ]}
+                        >
+                            <View style={styles.benchHeader}>
+                                <Users size={18} color="#F59E0B" />
+                                <Text style={[styles.benchTitle, { color: textPrimary }]}>
+                                    Banca / Personal Disponible ({benchEmployees.length})
+                                </Text>
+                            </View>
+                            <Text style={[styles.benchSub, { color: textSecondary }]}>
+                                Toca cualquier trabajador de la banca para insertarlo en una cuadrilla sin duplicar:
+                            </Text>
+
+                            <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                style={{ marginTop: 10 }}
+                            >
+                                {benchEmployees.slice(0, 25).map((emp) => (
+                                    <TouchableOpacity
+                                        key={emp.id}
+                                        onPress={() => setSelectedWorker(emp)}
+                                        style={[
+                                            styles.benchCard,
+                                            {
+                                                backgroundColor: isLight ? '#F8FAFC' : '#1E293B',
+                                                borderColor: borderCol,
+                                            },
+                                        ]}
+                                    >
+                                        <View
+                                            style={[
+                                                styles.specialtyPill,
+                                                { backgroundColor: emp.specialty.bg },
+                                            ]}
+                                        >
+                                            <Text
+                                                style={[
+                                                    styles.specialtyText,
+                                                    { color: emp.specialty.text },
+                                                ]}
+                                            >
+                                                {emp.specialty.label}
+                                            </Text>
+                                        </View>
+                                        <Text
+                                            style={[styles.benchName, { color: textPrimary }]}
+                                            numberOfLines={2}
+                                        >
+                                            {emp.fullName}
+                                        </Text>
+                                        <Text
+                                            style={[styles.benchRole, { color: textSecondary }]}
+                                            numberOfLines={1}
+                                        >
+                                            {emp.puestoNombre}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                        </View>
+                    </>
+                )}
+            </ScrollView>
+
+            {/* MODAL TÁCTICO DE REASIGNACIÓN CON ANIMACIÓN DE ESPECIALIDAD */}
+            <Modal visible={Boolean(selectedWorker)} animationType="slide" transparent>
+                <View style={styles.modalOverlay}>
+                    <View
+                        style={[
+                            styles.modalCard,
+                            { backgroundColor: bgCard, borderColor: borderCol },
+                        ]}
+                    >
+                        {selectedWorker && (
+                            <>
+                                <View style={styles.modalHeader}>
+                                    <View style={{ flex: 1 }}>
+                                        <View
+                                            style={[
+                                                styles.specialtyPill,
+                                                {
+                                                    backgroundColor: selectedWorker.specialty.bg,
+                                                    alignSelf: 'flex-start',
+                                                    marginBottom: 6,
+                                                },
+                                            ]}
+                                        >
+                                            <Text
+                                                style={[
+                                                    styles.specialtyText,
+                                                    { color: selectedWorker.specialty.text },
+                                                ]}
+                                            >
+                                                {selectedWorker.specialty.label}
+                                            </Text>
+                                        </View>
+                                        <Text style={[styles.modalTitle, { color: textPrimary }]}>
+                                            {selectedWorker.fullName}
+                                        </Text>
+                                        <Text style={[styles.modalSub, { color: textSecondary }]}>
+                                            Puesto Oficial: {selectedWorker.puestoNombre} • Código:{' '}
+                                            {selectedWorker.employee_code}
+                                        </Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        onPress={() => setSelectedWorker(null)}
+                                        style={styles.closeModalBtn}
+                                    >
+                                        <X size={18} color={textPrimary} />
+                                    </TouchableOpacity>
+                                </View>
+
+                                {/* Historial Semanal del Trabajador */}
+                                <View style={styles.historyBox}>
+                                    <History size={16} color="#D97706" />
+                                    <View style={{ flex: 1, marginLeft: 8 }}>
+                                        <Text style={styles.historyBoxTitle}>
+                                            HISTORIAL SEMANA 38 (21-27 SEP 2026)
+                                        </Text>
+                                        <Text style={styles.historyBoxDesc}>
+                                            {historyLog[selectedWorker.id]
+                                                ? `Cuadrilla Anterior: ${historyLog[selectedWorker.id].previousSquad} → Actual: ${historyLog[selectedWorker.id].currentSquad} (Movido por ${historyLog[selectedWorker.id].movedBy})`
+                                                : 'Asignación base de inicio de Semana 38 sin cambios registrados.'}
+                                        </Text>
+                                    </View>
+                                </View>
+
+                                {transferringTo ? (
+                                    <Animated.View
+                                        style={[
+                                            styles.animTransferBox,
+                                            {
+                                                transform: [
+                                                    {
+                                                        translateX: transferAnim.interpolate({
+                                                            inputRange: [0, 1],
+                                                            outputRange: [-30, 30],
+                                                        }),
+                                                    },
+                                                ],
+                                            },
+                                        ]}
+                                    >
+                                        <Text style={styles.animTransferTitle}>
+                                            {selectedWorker.specialty.animText}
+                                        </Text>
+                                        <Text style={styles.animTransferSub}>
+                                            Destino: {transferringTo} • Guardando en Supabase...
+                                        </Text>
+                                    </Animated.View>
+                                ) : canMoveSquads ? (
+                                    <>
+                                        <Text
+                                            style={[
+                                                styles.transferSectionTitle,
+                                                { color: textPrimary },
+                                            ]}
+                                        >
+                                            Selecciona Cuadrilla Destino (Traspaso Directo):
+                                        </Text>
+                                        <View style={styles.targetGrid}>
+                                            {cuadrillas.map((sq) => (
+                                                <TouchableOpacity
+                                                    key={sq.id}
+                                                    onPress={() =>
+                                                        handleMoveWorker(selectedWorker, sq.id)
+                                                    }
+                                                    style={styles.targetSquadBtn}
+                                                >
+                                                    <UserPlus size={16} color="#10B981" />
+                                                    <Text style={styles.targetSquadText}>
+                                                        {sq.nombre}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            ))}
+
+                                            <TouchableOpacity
+                                                onPress={() =>
+                                                    handleMoveWorker(selectedWorker, 'BENCH')
+                                                }
+                                                style={styles.targetBenchBtn}
+                                            >
+                                                <UserMinus size={16} color="#F43F5E" />
+                                                <Text style={styles.targetBenchText}>
+                                                    Enviar a Banca / Quitar de Cuadrilla
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </>
+                                ) : (
+                                    <View style={styles.restrictedNotice}>
+                                        <Lock size={18} color="#E11D48" />
+                                        <Text style={styles.restrictedNoticeText}>
+                                            Tu perfil ({sysRole}) es de consulta en cuadrillas. Solo el Superintendente y el Gerente pueden mover trabajadores.
+                                        </Text>
+                                    </View>
+                                )}
+                            </>
+                        )}
+                    </View>
+                </View>
+            </Modal>
+        </MobileShell>
+    )
+}
+
+const styles = StyleSheet.create({
+    scroll: {
+        flex: 1,
+        paddingHorizontal: 14,
+        paddingTop: 12,
+    },
+    ruleBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 12,
+        borderRadius: 16,
+        borderWidth: 1.5,
+        marginBottom: 12,
+    },
+    ruleTitle: {
+        fontSize: 12,
+        fontWeight: '900',
+    },
+    ruleSub: {
+        fontSize: 10,
+        marginTop: 2,
+    },
+    squadTabsScroll: {
+        marginBottom: 14,
+    },
+    squadTab: {
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderRadius: 14,
+        borderWidth: 1.5,
+        marginRight: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    squadTabName: {
+        fontSize: 13,
+        fontWeight: '900',
+    },
+    squadCountPill: {
+        paddingHorizontal: 7,
+        paddingVertical: 2,
+        borderRadius: 8,
+    },
+    squadCountText: {
+        fontSize: 10,
+        fontWeight: '900',
+    },
+    pitchContainer: {
+        borderRadius: 22,
+        padding: 14,
+        borderWidth: 2,
+        borderColor: '#10B981',
+        marginBottom: 16,
+    },
+    pitchHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(255,255,255,0.18)',
+        paddingBottom: 10,
+        marginBottom: 12,
+    },
+    pitchTitle: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '900',
+    },
+    pitchSub: {
+        color: '#A7F3D0',
+        fontSize: 11,
+        fontWeight: '700',
+        marginTop: 2,
+    },
+    pitchBadge: {
+        backgroundColor: '#10B981',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 8,
+    },
+    pitchBadgeText: {
+        color: '#022C22',
+        fontSize: 9,
+        fontWeight: '900',
+    },
+    emptyPitch: {
+        paddingVertical: 30,
+        alignItems: 'center',
+    },
+    emptyPitchText: {
+        color: '#A7F3D0',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    playersGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+    },
+    playerCard: {
+        width: '48.5%',
+        backgroundColor: 'rgba(15, 23, 42, 0.88)',
+        borderRadius: 16,
+        padding: 11,
+        marginBottom: 10,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.2)',
+    },
+    specialtyPill: {
+        paddingHorizontal: 7,
+        paddingVertical: 3,
+        borderRadius: 6,
+        alignSelf: 'flex-start',
+        marginBottom: 6,
+    },
+    specialtyText: {
+        fontSize: 9,
+        fontWeight: '900',
+    },
+    playerName: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '900',
+        lineHeight: 16,
+    },
+    playerPuesto: {
+        color: '#94A3B8',
+        fontSize: 10,
+        fontWeight: '700',
+        marginTop: 3,
+    },
+    historyTag: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(245, 158, 11, 0.18)',
+        paddingHorizontal: 6,
+        paddingVertical: 3,
+        borderRadius: 6,
+        marginTop: 6,
+        gap: 4,
+    },
+    historyTagText: {
+        color: '#FBBF24',
+        fontSize: 9,
+        fontWeight: '800',
+    },
+    benchSection: {
+        borderRadius: 18,
+        borderWidth: 1.5,
+        padding: 14,
+    },
+    benchHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    benchTitle: {
+        fontSize: 14,
+        fontWeight: '900',
+    },
+    benchSub: {
+        fontSize: 11,
+        marginTop: 3,
+    },
+    benchCard: {
+        width: 145,
+        padding: 10,
+        borderRadius: 14,
+        borderWidth: 1,
+        marginRight: 8,
+    },
+    benchName: {
+        fontSize: 12,
+        fontWeight: '800',
+    },
+    benchRole: {
+        fontSize: 10,
+        marginTop: 2,
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(2, 6, 23, 0.72)',
+        justifyContent: 'flex-end',
+    },
+    modalCard: {
+        borderTopLeftRadius: 26,
+        borderTopRightRadius: 26,
+        borderTopWidth: 2,
+        padding: 20,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: 14,
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontWeight: '900',
+    },
+    modalSub: {
+        fontSize: 11,
+        marginTop: 2,
+    },
+    closeModalBtn: {
+        padding: 8,
+        borderRadius: 10,
+        backgroundColor: '#E2E8F030',
+    },
+    historyBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FEF3C7',
+        borderColor: '#F59E0B',
+        borderWidth: 1,
+        borderRadius: 14,
+        padding: 12,
+        marginBottom: 16,
+    },
+    historyBoxTitle: {
+        color: '#92400E',
+        fontSize: 10,
+        fontWeight: '900',
+    },
+    historyBoxDesc: {
+        color: '#78350F',
+        fontSize: 11,
+        fontWeight: '700',
+        marginTop: 2,
+    },
+    animTransferBox: {
+        backgroundColor: '#064E3B',
+        padding: 18,
+        borderRadius: 16,
+        alignItems: 'center',
+        marginVertical: 14,
+        borderWidth: 1.5,
+        borderColor: '#10B981',
+    },
+    animTransferTitle: {
+        color: '#34D399',
+        fontSize: 14,
+        fontWeight: '900',
+    },
+    animTransferSub: {
+        color: '#FFFFFF',
+        fontSize: 11,
+        marginTop: 4,
+        fontWeight: '700',
+    },
+    transferSectionTitle: {
+        fontSize: 13,
+        fontWeight: '900',
+        marginBottom: 10,
+    },
+    targetGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    targetSquadBtn: {
+        width: '48%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#064E3B',
+        borderColor: '#10B981',
+        borderWidth: 1.5,
+        padding: 12,
+        borderRadius: 12,
+        gap: 8,
+    },
+    targetSquadText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '900',
+    },
+    targetBenchBtn: {
+        width: '100%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#FFE4E6',
+        borderColor: '#F43F5E',
+        borderWidth: 1.5,
+        padding: 12,
+        borderRadius: 12,
+        marginTop: 4,
+        gap: 8,
+    },
+    targetBenchText: {
+        color: '#E11D48',
+        fontSize: 12,
+        fontWeight: '900',
+    },
+    restrictedNotice: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFE4E6',
+        padding: 14,
+        borderRadius: 14,
+        gap: 10,
+    },
+    restrictedNoticeText: {
+        flex: 1,
+        color: '#9F1239',
+        fontSize: 11,
+        fontWeight: '700',
+    },
+})
