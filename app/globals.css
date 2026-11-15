@@ -47,6 +47,14 @@
       linear-gradient(to bottom, rgb(10, 10, 14), rgb(15, 23, 35));
     transition: background-color 0.25s ease, color 0.25s ease;
   }
+
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    background-color: #0f172a;
+    border: 1px solid #334155;
+    color: #f8fafc;
+  }
 }
 
 /* ==========================================================================

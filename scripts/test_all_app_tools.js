@@ -270,6 +270,11 @@ async function runTests() {
     const routes = [
         '/',
         '/login',
+        '/mobile',
+        '/manifest.webmanifest',
+        '/sw.js',
+        '/icon-192.png',
+        '/icon-512.png',
         '/dashboard',
         '/dashboard/chat',
         '/dashboard/semana',

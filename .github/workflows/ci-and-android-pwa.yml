@@ -1,0 +1,28 @@
+name: Build & Deploy Raya Mina (Web + Android PWA)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Build Production Bundle (Web + /mobile Android PWA)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://dmlhmgnkmdjujhefzrmz.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_gM9gIe8-qjOpO-3aKNHokw_uM7Sw5DJ
+        run: npm run build

@@ -235,7 +235,20 @@ export default function AuthPage() {
                                     className="w-full bg-slate-800/40 hover:bg-slate-700/60 text-slate-300 hover:text-white text-sm font-semibold py-3 rounded-xl flex items-center justify-center gap-2 transition-all border border-slate-700/50 hover:border-slate-500/50"
                                 >
                                     <PlayCircle className="w-5 h-5 text-amber-500" />
-                                    Ingresar Modo Explorador
+                                    Ingresar Modo Explorador (Escritorio)
+                                </motion.button>
+
+                                <motion.button
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    type="button"
+                                    onClick={() => {
+                                        loginAsDemo()
+                                        router.push('/mobile')
+                                    }}
+                                    className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg"
+                                >
+                                    📱 Abrir App Celular Android (Sin Expo Go)
                                 </motion.button>
                             </div>
                         )}

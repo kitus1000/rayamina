@@ -125,8 +125,18 @@ export default function Topbar() {
                 </div>
             </div>
 
-            {/* Right: PDF Export, Theme Toggle (Modo Día / Noche), Profile */}
-            <div className="flex items-center gap-2.5 shrink-0">
+            {/* Right: Mobile App Mode, PDF Export, Theme Toggle (Modo Día / Noche), Profile */}
+            <div className="flex items-center gap-2 shrink-0">
+                {/* Botón Directo a Versión App Celular Android */}
+                <button
+                    onClick={() => router.push('/mobile')}
+                    title="Abrir Interfaz App Celular Android (Sin Expo Go)"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black transition-all shadow-sm cursor-pointer"
+                >
+                    <span>📱</span>
+                    <span className="hidden sm:inline">App Android</span>
+                </button>
+
                 {/* Botón Universal Exportar a PDF */}
                 <button
                     onClick={() => window.print()}
