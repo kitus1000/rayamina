@@ -32,13 +32,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Configurar Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Instalar Android SDK 36, Build Tools, NDK 27 y CMake
+      - name: Configurar Android SDK y Licencias
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006" "cmake;3.22.1"
+          sudo chown -R runner:docker $ANDROID_HOME
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "cmake;3.22.1" || true
 
       - name: Instalar dependencias de mobile-android
         working-directory: mobile-android
@@ -73,7 +71,14 @@ jobs:
 
       - name: Preparar archivo RayaMina-Android.apk
         run: |
-          cp mobile-android/android/app/build/outputs/apk/release/app-release.apk RayaMina-Android.apk
+          echo "Buscando APK generado..."
+          find mobile-android/android/app/build/outputs/apk -name "*.apk"
+          APK_PATH=$(find mobile-android/android/app/build/outputs/apk -name "*release*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            APK_PATH=$(find mobile-android/android/app/build/outputs/apk -name "*.apk" | head -n 1)
+          fi
+          echo "Copiando $APK_PATH a RayaMina-Android.apk"
+          cp "$APK_PATH" RayaMina-Android.apk
           ls -lh RayaMina-Android.apk
 
       - name: Subir APK a GitHub Actions Artifacts
@@ -85,6 +90,8 @@ jobs:
 
       - name: Publicar APK descargable en GitHub Releases
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: apk-v1.${{ github.run_number }}
           name: LA RAYA MINA — Android APK (Build #${{ github.run_number }})
