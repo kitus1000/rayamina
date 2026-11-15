@@ -27,6 +27,10 @@ async function createOrUpdateCuadrilla(
         unit_id: string,
         turno_id: string,
         supervisor_id?: string,
+        supervisor_employee_name?: string,
+        supervisor_user_id?: string,
+        supervisor_user_email?: string,
+        supervisor_user_name?: string,
         activo: boolean
     }
 ): Promise<ServiceResponse> {
@@ -39,8 +43,9 @@ async function createOrUpdateCuadrilla(
             activo: data.activo
         }
 
+        let cuadrillaId = data.id
+
         if (data.id) {
-            // Update
             const { error } = await supabase
                 .from('cat_cuadrillas')
                 .update(dbPayload)
@@ -48,13 +53,27 @@ async function createOrUpdateCuadrilla(
 
             if (error) throw error
         } else {
-            // Create
-            const { error } = await supabase
+            const { data: inserted, error } = await supabase
                 .from('cat_cuadrillas')
                 .insert(dbPayload)
+                .select('id')
+                .single()
 
             if (error) throw error
+            cuadrillaId = inserted?.id
         }
+
+        if (cuadrillaId && (data.supervisor_id || data.supervisor_user_email)) {
+            const { saveSquadSupervisorMeta } = await import('@/lib/notifications-service')
+            await saveSquadSupervisorMeta(cuadrillaId, {
+                supervisor_employee_id: data.supervisor_id || null,
+                supervisor_employee_name: data.supervisor_employee_name || null,
+                supervisor_user_id: data.supervisor_user_id || null,
+                supervisor_user_email: data.supervisor_user_email || null,
+                supervisor_user_name: data.supervisor_user_name || null
+            })
+        }
+
         return { success: true }
     } catch (error: any) {
         console.error('Error in createOrUpdateCuadrilla:', error)
@@ -133,8 +152,9 @@ type Cuadrilla = {
     org_units?: { nombre_unidad: string }
     cat_turnos?: { codigo: string, nombre: string }
     rh_employees?: { first_name: string, last_name: string } // Supervisor
-    // Count
+    // Count & metadata
     miembros_count?: number
+    supervisor_meta?: any
 }
 
 type Employee = {
@@ -210,12 +230,16 @@ export default function CuadrillasPage() {
                 countMap[m.cuadrilla_id] = (countMap[m.cuadrilla_id] || 0) + 1
             })
 
+            const { getSquadSupervisorsMeta } = await import('@/lib/notifications-service')
+            const metaMap = await getSquadSupervisorsMeta()
+
             const processed = data.map((c: any) => ({
                 ...c,
                 unit_id: c.mine_site_id,
                 turno_id: c.turno_actual_id,
                 org_units: { nombre_unidad: c.mine_sites?.nombre_mina || 'Mina El Herrero' },
-                miembros_count: countMap[c.id] || 0
+                miembros_count: countMap[c.id] || 0,
+                supervisor_meta: metaMap[c.id] || null
             }))
             setCuadrillas(processed)
         }
@@ -421,19 +445,28 @@ function CuadrillaCard({ cuadrilla, onEdit, onMembers }: { cuadrilla: Cuadrilla,
             </div>
 
             <div className="space-y-4">
-                <div className="flex items-center gap-3 p-3 bg-slate-950/50 rounded-xl border border-slate-800/50">
+                <div className={`flex items-center gap-3 p-3 rounded-xl border ${
+                    cuadrilla.rh_employees || cuadrilla.supervisor_meta?.supervisor_employee_name
+                        ? 'bg-slate-950/50 border-slate-800/50'
+                        : 'bg-amber-500/10 border-amber-500/30'
+                }`}>
                     <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400">
                         {cuadrilla.rh_employees ?
                             (cuadrilla.rh_employees.first_name[0] + cuadrilla.rh_employees.last_name[0]) :
-                            'N/A'}
+                            '⚠️'}
                     </div>
-                    <div>
-                        <div className="text-xs text-slate-500 uppercase font-medium">Supervisor</div>
-                        <div className="text-sm text-slate-200">
+                    <div className="min-w-0 flex-1">
+                        <div className="text-xs text-slate-500 uppercase font-medium">Supervisor a Cargo</div>
+                        <div className="text-sm text-slate-200 font-semibold truncate">
                             {cuadrilla.rh_employees ?
                                 `${cuadrilla.rh_employees.first_name} ${cuadrilla.rh_employees.last_name}` :
-                                'Sin Asignar'}
+                                (cuadrilla.supervisor_meta?.supervisor_employee_name || 'Sin Asignar — Requerido')}
                         </div>
+                        {cuadrilla.supervisor_meta?.supervisor_user_email && (
+                            <div className="text-[11px] text-emerald-400 truncate">
+                                🔔 Alertas: {cuadrilla.supervisor_meta.supervisor_user_email}
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -473,28 +506,44 @@ function CreateEditModal({ cuadrilla, onClose, onSuccess, unidades, turnos }: an
         unit_id: cuadrilla?.unit_id || '',
         turno_id: cuadrilla?.turno_id || '',
         supervisor_id: cuadrilla?.supervisor_id || '',
+        supervisor_user_email: cuadrilla?.supervisor_meta?.supervisor_user_email || '',
         activo: cuadrilla?.activo ?? true
     })
     const [submitting, setSubmitting] = useState(false)
     const [supervisors, setSupervisors] = useState<any[]>([])
+    const [webUsers, setWebUsers] = useState<any[]>([])
 
-    // Cargar supervisores (podría optimizarse para cargar solo al abrir o buscar)
     useEffect(() => {
         const fetchSups = async () => {
-            const { data } = await supabase
-                .from('rh_employees')
-                .select('id, first_name, last_name, employee_code')
-                .eq('status', 'ACTIVE')
-                .order('first_name')
-            if (data) setSupervisors(data)
+            const [empRes, userRes] = await Promise.all([
+                supabase
+                    .from('rh_employees')
+                    .select('id, first_name, last_name, employee_code, is_supervisor, is_jefe_mina')
+                    .in('status', ['ACTIVO', 'ACTIVE'])
+                    .order('first_name'),
+                supabase
+                    .from('sys_users')
+                    .select('id, email, full_name, role')
+                    .order('full_name')
+            ])
+            if (empRes.data) setSupervisors(empRes.data)
+            if (userRes.data) setWebUsers(userRes.data)
         }
         fetchSups()
     }, [])
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
+        const selectedEmp = supervisors.find((s: any) => s.id === formData.supervisor_id)
+        const selectedWeb = webUsers.find((u: any) => u.email === formData.supervisor_user_email)
         setSubmitting(true)
-        const res = await createOrUpdateCuadrilla({ ...formData, id: cuadrilla?.id })
+        const res = await createOrUpdateCuadrilla({
+            ...formData,
+            id: cuadrilla?.id,
+            supervisor_employee_name: selectedEmp ? `${selectedEmp.first_name} ${selectedEmp.last_name}`.trim() : '',
+            supervisor_user_id: selectedWeb?.id || '',
+            supervisor_user_name: selectedWeb?.full_name || ''
+        })
         setSubmitting(false)
         if (res.success) onSuccess()
         else alert('Error: ' + res.error)
@@ -555,15 +604,38 @@ function CreateEditModal({ cuadrilla, onClose, onSuccess, unidades, turnos }: an
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-slate-400 mb-1">Supervisor a Cargo</label>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">
+                            Supervisor a Cargo (Requerido para cada cuadrilla)
+                        </label>
                         <select
+                            required
                             value={formData.supervisor_id}
                             onChange={e => setFormData(prev => ({ ...prev, supervisor_id: e.target.value }))}
                             className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-purple-500 outline-none"
                         >
-                            <option value="">Sin supervisor asignado</option>
+                            <option value="">Selecciona el supervisor titular...</option>
                             {supervisors.map((s: any) => (
-                                <option key={s.id} value={s.id}>{s.employee_code} - {s.first_name} {s.last_name}</option>
+                                <option key={s.id} value={s.id}>
+                                    {s.employee_code} - {s.first_name} {s.last_name}{s.is_supervisor ? ' (Supervisor)' : ''}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">
+                            Cuenta Web / App del Supervisor (Para notificaciones de baja)
+                        </label>
+                        <select
+                            value={formData.supervisor_user_email}
+                            onChange={e => setFormData(prev => ({ ...prev, supervisor_user_email: e.target.value }))}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-purple-500 outline-none"
+                        >
+                            <option value="">Auto-vincular por nombre / cuentas de supervisión</option>
+                            {webUsers.map((u: any) => (
+                                <option key={u.id} value={u.email}>
+                                    {u.full_name} ({u.role}) — {u.email}
+                                </option>
                             ))}
                         </select>
                     </div>

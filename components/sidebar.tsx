@@ -300,11 +300,12 @@ export default function Sidebar() {
                 )}
             </AnimatePresence>
 
-            {/* Sidebar Fijo en Escritorio */}
+            {/* Sidebar Fijo en Escritorio (En flujo para evitar desbordamiento lateral) */}
             <motion.aside
                 initial={false}
                 animate={{ width: isDesktopOpen ? 256 : 76 }}
-                className="hidden md:flex fixed left-0 top-0 bottom-0 bg-slate-900 border-r border-slate-800 z-40 flex-col transition-colors duration-300 shadow-xl html2pdf__ignore"
+                transition={{ duration: 0.2, ease: 'easeOut' }}
+                className="hidden md:flex shrink-0 h-screen sticky top-0 bg-slate-900 border-r border-slate-800 z-40 flex-col transition-colors duration-300 shadow-xl html2pdf__ignore"
             >
                 {renderMenuContent(isDesktopOpen, false)}
             </motion.aside>

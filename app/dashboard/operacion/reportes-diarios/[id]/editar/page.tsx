@@ -6,6 +6,13 @@ import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
+import {
+    pushNotification,
+    getReportCreatorMeta,
+    appendReportRevision,
+    getSquadSupervisorsMeta,
+    ReportCreatorMeta
+} from '@/lib/notifications-service'
 import { useRouter } from 'next/navigation'
 
 // --- TYPES ---
@@ -41,7 +48,28 @@ type ActivityItem = {
 
 export default function EditDailyReportPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params)
-    const { user, permissions, sysRole } = useAuth()
+    const { user, permissions, sysRole, fullName } = useAuth()
+    const [reviewApproveMode, setReviewApproveMode] = useState(false)
+    const [correctionNote, setCorrectionNote] = useState('')
+    const [creatorMeta, setCreatorMeta] = useState<ReportCreatorMeta | null>(null)
+    const [originalSnapshot, setOriginalSnapshot] = useState<any>(null)
+
+    const canReviewApprove = [
+        'JEFE_PLANEACION',
+        'GERENTE',
+        'SUPERINTENDENTE',
+        'DIRECTOR_OPERATIVO',
+        'SUPER_ADMIN'
+    ].includes(sysRole || '') || Boolean(permissions?.can_approve_reports && sysRole !== 'JEFE_MINA')
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const sp = new URLSearchParams(window.location.search)
+            if (sp.get('reviewApprove') === '1') {
+                setReviewApproveMode(true)
+            }
+        }
+    }, [])
     const router = useRouter()
     const isReadOnly = sysRole === 'LECTURA'
 
@@ -191,6 +219,32 @@ export default function EditDailyReportPage({ params }: { params: Promise<{ id: 
             participantes: (i.ops_report_personnel || []).map((p: any) => p.empleado_id)
         }))
         setActivities(actList)
+
+        setOriginalSnapshot({
+            fecha: data.fecha,
+            turno_id: data.turno_id,
+            cuadrilla_id: data.cuadrilla_id,
+            mine_site_id: data.mine_site_id,
+            observaciones: data.comentarios_supervisor || data.observaciones_generales || '',
+            attendance: attList.map(a => ({
+                empleado_id: a.empleado_id,
+                nombre: a.nombre,
+                estado_codigo: a.estado_codigo
+            })),
+            activities: actList.map(a => ({
+                temp_id: a.temp_id,
+                producto_nombre: a.producto_nombre,
+                cantidad_total: Number(a.cantidad_total),
+                unidad: a.unidad,
+                location_id: a.location_id,
+                location_nombre: a.location_nombre,
+                equipo_id: a.equipo_id,
+                equipo_nombre: a.equipo_nombre
+            }))
+        })
+
+        const cMeta = await getReportCreatorMeta(id as string)
+        setCreatorMeta(cMeta)
     }
 
     // Load locations when mine site changes
@@ -220,15 +274,83 @@ export default function EditDailyReportPage({ params }: { params: Promise<{ id: 
         }
     }
 
-    const handleSaveReport = async () => {
+    const computeReportChanges = (): string[] => {
+        if (!originalSnapshot) return []
+        const changes: string[] = []
+
+        if (originalSnapshot.fecha !== fecha) {
+            changes.push(`Fecha modificada: ${originalSnapshot.fecha} → ${fecha}`)
+        }
+        if (originalSnapshot.turno_id !== selectedTurno) {
+            const oldT = turnos.find(t => t.id === originalSnapshot.turno_id)?.nombre || originalSnapshot.turno_id
+            const newT = turnos.find(t => t.id === selectedTurno)?.nombre || selectedTurno
+            changes.push(`Turno modificado: ${oldT} → ${newT}`)
+        }
+        if (originalSnapshot.cuadrilla_id !== selectedCuadrilla) {
+            const oldC = cuadrillas.find(c => c.id === originalSnapshot.cuadrilla_id)?.nombre || originalSnapshot.cuadrilla_id
+            const newC = cuadrillas.find(c => c.id === selectedCuadrilla)?.nombre || selectedCuadrilla
+            changes.push(`Cuadrilla modificada: ${oldC} → ${newC}`)
+        }
+        if (originalSnapshot.mine_site_id !== selectedMina) {
+            const oldM = minas.find(m => m.id === originalSnapshot.mine_site_id)?.nombre_mina || originalSnapshot.mine_site_id
+            const newM = minas.find(m => m.id === selectedMina)?.nombre_mina || selectedMina
+            changes.push(`Mina / Sitio modificado: ${oldM} → ${newM}`)
+        }
+        if ((originalSnapshot.observaciones || '').trim() !== (supervisorComments || '').trim()) {
+            changes.push('Comentarios generales del turno actualizados.')
+        }
+
+        const origAttMap = new Map<string, any>(
+            (originalSnapshot.attendance || []).map((a: any) => [a.empleado_id, a])
+        )
+        attendanceList.forEach(a => {
+            const prev = origAttMap.get(a.empleado_id)
+            if (prev && prev.estado_codigo !== a.estado_codigo) {
+                changes.push(`Asistencia de ${a.nombre.trim()}: ${prev.estado_codigo} → ${a.estado_codigo}`)
+            }
+        })
+
+        const origActs = originalSnapshot.activities || []
+        const origMap = new Map<string, any>(origActs.map((a: any) => [a.temp_id, a]))
+        const currMap = new Map<string, ActivityItem>(activities.map(a => [a.temp_id, a]))
+
+        activities.forEach(act => {
+            const prev = origMap.get(act.temp_id)
+            if (!prev) {
+                changes.push(`Actividad agregada: ${act.producto_nombre} (${act.cantidad_total} ${act.unidad})`)
+            } else {
+                if (Number(prev.cantidad_total) !== Number(act.cantidad_total)) {
+                    changes.push(`Cantidad en "${act.producto_nombre}": ${prev.cantidad_total} → ${act.cantidad_total} ${act.unidad}`)
+                }
+                if (prev.location_id !== act.location_id) {
+                    changes.push(`Frente en "${act.producto_nombre}": ${prev.location_nombre || '-'} → ${act.location_nombre || '-'}`)
+                }
+                if ((prev.equipo_id || '') !== (act.equipo_id || '')) {
+                    changes.push(`Equipo en "${act.producto_nombre}": ${prev.equipo_nombre || 'Ninguno'} → ${act.equipo_nombre || 'Ninguno'}`)
+                }
+            }
+        })
+
+        origActs.forEach((prev: any) => {
+            if (!currMap.has(prev.temp_id)) {
+                changes.push(`Actividad eliminada: ${prev.producto_nombre} (${prev.cantidad_total} ${prev.unidad})`)
+            }
+        })
+
+        return changes
+    }
+
+    const handleSaveReport = async (approveAfterSave: boolean = false) => {
         setLoading(true)
         try {
+            const targetStatus = approveAfterSave ? 'APROBADO' : 'EN_REVISION'
             // 1. Update Header
             const { error: errH } = await supabase
                 .from('ops_daily_reports')
                 .update({
                     fecha,
-                    estado: 'EN_REVISION',
+                    estado: targetStatus,
+                    status: targetStatus,
                     turno_id: selectedTurno,
                     cuadrilla_id: selectedCuadrilla,
                     mine_site_id: selectedMina,
@@ -331,7 +453,55 @@ export default function EditDailyReportPage({ params }: { params: Promise<{ id: 
                 }
             }
 
-            toast.success('Reporte actualizado correctamente')
+            const changesList = computeReportChanges()
+            const effectiveChanges = changesList.length > 0
+                ? changesList
+                : (correctionNote.trim() ? [`Nota de revisión: ${correctionNote.trim()}`] : ['Revisión validada y aprobada sin cambios adicionales en cantidades.'])
+            const reviewerName = fullName || user?.email || sysRole || 'Revisión Operativa'
+            const cuadName = cuadrillas.find(c => c.id === selectedCuadrilla)?.nombre || 'Cuadrilla'
+
+            if (approveAfterSave || (canReviewApprove && changesList.length > 0)) {
+                await appendReportRevision(id as string, {
+                    edited_by_name: reviewerName,
+                    edited_by_email: user?.email || null,
+                    edited_by_role: sysRole || null,
+                    approved_with_changes: approveAfterSave && changesList.length > 0,
+                    changes: effectiveChanges,
+                    note: correctionNote.trim() || undefined
+                })
+
+                const metaMap = await getSquadSupervisorsMeta()
+                const sqMeta = metaMap[selectedCuadrilla]
+                const targetEmails = [
+                    creatorMeta?.creator_email,
+                    creatorMeta?.supervisor_user_email,
+                    sqMeta?.supervisor_user_email
+                ].filter(Boolean) as string[]
+
+                await pushNotification({
+                    type: approveAfterSave ? (changesList.length > 0 ? 'REPORT_CORRECTED' : 'REPORT_APPROVED') : 'REPORT_CORRECTED',
+                    title: approveAfterSave
+                        ? (changesList.length > 0 ? `Reporte ${fecha} Corregido y Aprobado` : `Reporte ${fecha} Aprobado`)
+                        : `Cambios Realizados en Reporte (${fecha})`,
+                    message: approveAfterSave
+                        ? `${reviewerName} (${(sysRole || 'REVISIÓN').replace(/_/g, ' ')}) ${changesList.length > 0 ? 'ajustó datos y aprobó' : 'aprobó'} el reporte de ${cuadName}.${correctionNote.trim() ? ` Nota: ${correctionNote.trim()}` : ''}`
+                        : `${reviewerName} modificó datos del reporte de ${cuadName}.`,
+                    details: effectiveChanges,
+                    target_user_ids: creatorMeta?.creator_user_id ? [creatorMeta.creator_user_id] : undefined,
+                    target_user_emails: targetEmails,
+                    target_employee_id: creatorMeta?.supervisor_employee_id || sqMeta?.supervisor_employee_id || null,
+                    target_employee_name: creatorMeta?.supervisor_name || sqMeta?.supervisor_employee_name || null,
+                    created_by_name: reviewerName,
+                    created_by_email: user?.email || null,
+                    link: `/dashboard/operacion/reportes-diarios/${id}`
+                })
+            }
+
+            toast.success(
+                approveAfterSave
+                    ? 'Reporte corregido, aprobado y notificado al supervisor'
+                    : 'Reporte actualizado correctamente'
+            )
             window.location.href = `/dashboard/operacion/reportes-diarios/${id}`
 
         } catch (error: any) {
@@ -386,15 +556,19 @@ export default function EditDailyReportPage({ params }: { params: Promise<{ id: 
     }
 
     const handleUnlock = async () => {
-        if (!user?.email) return
-        const { data: sysUser } = await supabase.from('sys_users').select('auth_password').eq('email', user.email).single()
-
-        if (sysUser?.auth_password === unlockPassword && unlockPassword !== '') {
-            setIsLocked(false)
-            toast.success('Edición desbloqueada')
-        } else {
-            toast.error('Contraseña incorrecta')
+        if (!unlockPassword) return toast.error('Ingresa tu contraseña')
+        if (user?.email) {
+            const { error } = await supabase.auth.signInWithPassword({
+                email: user.email,
+                password: unlockPassword
+            })
+            if (!error) {
+                setIsLocked(false)
+                toast.success('Edición desbloqueada')
+                return
+            }
         }
+        toast.error('Contraseña incorrecta')
     }
 
     if (initialLoading) return <div className="p-12 text-center text-amber-500 animate-pulse font-bold">Cargando datos del reporte...</div>
@@ -458,15 +632,37 @@ export default function EditDailyReportPage({ params }: { params: Promise<{ id: 
                 </Link>
             </div>
 
-            <div className="mb-8 flex justify-between items-center">
+            <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-white">Editar Reporte de Operación</h1>
-                    <p className="text-slate-400">Modifica los datos capturados previamente.</p>
+                    <h1 className="text-2xl font-bold text-white">
+                        {reviewApproveMode ? 'Revisión, Corrección y Aprobación de Reporte' : 'Editar Reporte de Operación'}
+                    </h1>
+                    <p className="text-slate-400 text-sm">
+                        {reviewApproveMode
+                            ? 'Ajusta los datos que no cuadren y pulsa "Guardar Correcciones y Aprobar". Quien envió el reporte recibirá todos los cambios.'
+                            : 'Modifica los datos capturados previamente.'}
+                    </p>
                 </div>
-                {/* WIZARD INDICATOR */}
-                <div className="flex gap-2">
-                    {['HEADER', 'ATTENDANCE', 'ACTIVITIES', 'SUMMARY'].map((step, idx) => (
-                        <div key={step} className={`w-3 h-3 rounded-full ${currentStep === step ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : idx < ['HEADER', 'ATTENDANCE', 'ACTIVITIES', 'SUMMARY'].indexOf(currentStep) ? 'bg-emerald-500' : 'bg-slate-800'}`} />
+                {/* WIZARD INDICATOR CLICKABLE */}
+                <div className="flex flex-wrap gap-1.5">
+                    {[
+                        { id: 'HEADER', label: '1. Encabezado' },
+                        { id: 'ATTENDANCE', label: '2. Asistencia' },
+                        { id: 'ACTIVITIES', label: '3. Actividades' },
+                        { id: 'SUMMARY', label: '4. Cierre/Aprobar' }
+                    ].map(step => (
+                        <button
+                            key={step.id}
+                            type="button"
+                            onClick={() => setCurrentStep(step.id as WizardStep)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                                currentStep === step.id
+                                    ? 'bg-amber-500 text-slate-950 border-amber-500'
+                                    : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'
+                            }`}
+                        >
+                            {step.label}
+                        </button>
                     ))}
                 </div>
             </div>
@@ -677,11 +873,43 @@ export default function EditDailyReportPage({ params }: { params: Promise<{ id: 
                             </div>
                         </div>
 
-                        <div className="flex justify-between pt-8 border-t border-slate-800">
-                            <button onClick={() => setCurrentStep('ACTIVITIES')} className="text-slate-500 hover:text-white font-bold transition-colors">← Corregir Datos</button>
-                            <button onClick={handleSaveReport} disabled={loading} className="bg-emerald-600 hover:bg-emerald-500 transition-all text-white px-12 py-4 rounded-2xl font-black flex items-center gap-3 shadow-2xl shadow-emerald-900/50 scale-110 active:scale-100">
-                                <Save size={24} /> {loading ? 'Actualizando...' : 'GUARDAR CAMBIOS'}
-                            </button>
+                        {canReviewApprove && (
+                            <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5 space-y-3">
+                                <label className="block text-xs font-black uppercase tracking-wider text-amber-400">
+                                    Nota de Revisión / Motivo de Correcciones (Se enviará al Supervisor / Emisor)
+                                </label>
+                                <input
+                                    type="text"
+                                    value={correctionNote}
+                                    onChange={e => setCorrectionNote(e.target.value)}
+                                    placeholder="Ej. Se ajustó tonelaje de rezaga conforme a báscula y se corrigió falta de operador..."
+                                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                                />
+                                {computeReportChanges().length > 0 && (
+                                    <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-1">
+                                        <div className="text-[11px] font-black uppercase text-amber-300">
+                                            Cambios detectados ({computeReportChanges().length}):
+                                        </div>
+                                        {computeReportChanges().map((ch, idx) => (
+                                            <div key={idx} className="text-xs text-slate-300">• {ch}</div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        <div className="flex flex-wrap justify-between items-center gap-4 pt-8 border-t border-slate-800">
+                            <button onClick={() => setCurrentStep('ACTIVITIES')} className="text-slate-500 hover:text-white font-bold transition-colors cursor-pointer">← Corregir Datos</button>
+                            <div className="flex flex-wrap items-center gap-3">
+                                <button onClick={() => handleSaveReport(false)} disabled={loading} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 cursor-pointer">
+                                    <Save size={18} /> {loading ? 'Guardando...' : 'Guardar Cambios (En Revisión)'}
+                                </button>
+                                {canReviewApprove && (
+                                    <button onClick={() => handleSaveReport(true)} disabled={loading} className="bg-emerald-600 hover:bg-emerald-500 transition-all text-white px-7 py-3.5 rounded-xl font-black flex items-center gap-2 shadow-xl shadow-emerald-900/40 cursor-pointer">
+                                        <Save size={20} /> {loading ? 'Aprobando...' : 'Guardar Correcciones y Aprobar'}
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}

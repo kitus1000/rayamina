@@ -44,7 +44,7 @@ export default function PuestosRolesPage() {
             </div>
 
             {/* Tabs Header */}
-            <div className="flex border-b border-slate-800">
+            <div className="flex border-b border-slate-800 overflow-x-auto whitespace-nowrap">
                 <button
                     onClick={() => setActiveTab('PUESTOS')}
                     className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'PUESTOS'

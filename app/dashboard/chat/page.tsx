@@ -4,22 +4,45 @@ import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '@/lib/auth-context'
 import { BlogService, BlogMessage } from '@/lib/blog-service'
 import { supabase } from '@/lib/supabase'
-import { Users, User, Send, CheckCircle, XCircle, Clock, MessageSquare, Loader2, Info, Printer, ShieldAlert, Pickaxe, Calendar } from 'lucide-react'
+import { pushNotification } from '@/lib/notifications-service'
+import { Users, User, Send, CheckCircle, XCircle, Clock, MessageSquare, Loader2, Info, Printer, ShieldAlert, Pickaxe, Calendar, Globe, Lock } from 'lucide-react'
+
+interface TeamUserOption {
+    id: string
+    email: string
+    full_name: string
+    role: string
+}
 
 export default function BlogTareasPage() {
-    const { user, sysRole, sysUserId } = useAuth()
+    const { user, sysRole, sysUserId, fullName } = useAuth()
 
     const [messages, setMessages] = useState<BlogMessage[]>([])
+    const [teamUsers, setTeamUsers] = useState<TeamUserOption[]>([])
     const [newMessage, setNewMessage] = useState('')
     const [isSendingTask, setIsSendingTask] = useState(false)
+    const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>('PUBLIC')
+    const [recipientId, setRecipientId] = useState<string>('')
     const [isLoading, setIsLoading] = useState(true)
     const [errorMsg, setErrorMsg] = useState<string | null>(null)
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
-    const [filterType, setFilterType] = useState<'ALL' | 'TASKS' | 'PENDING'>('ALL')
+    const [filterType, setFilterType] = useState<'ALL' | 'PUBLIC' | 'PRIVATE' | 'TASKS' | 'PENDING'>('ALL')
 
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
     const effectiveUserId = sysUserId || user?.id || 'demo-user-123'
+    const currentEmail = (user?.email || '').toLowerCase()
+    const currentName = fullName || currentEmail.split('@')[0] || 'Usuario'
+
+    useEffect(() => {
+        supabase
+            .from('sys_users')
+            .select('id, email, full_name, role')
+            .order('full_name')
+            .then(({ data }) => {
+                if (data) setTeamUsers(data as TeamUserOption[])
+            })
+    }, [])
 
     // Initial Load
     useEffect(() => {
@@ -67,8 +90,14 @@ export default function BlogTareasPage() {
         e.preventDefault()
         if (!newMessage.trim()) return
 
+        if (!editingMessageId && visibility === 'PRIVATE' && !recipientId) {
+            alert('En modo Privado debes seleccionar el usuario destinatario.')
+            return
+        }
+
         const body = newMessage
         const isTask = isSendingTask
+        const targetUser = teamUsers.find(u => u.id === recipientId)
         setNewMessage('')
         setIsSendingTask(false)
 
@@ -77,7 +106,28 @@ export default function BlogTareasPage() {
                 await BlogService.editMessage(editingMessageId, body)
                 setEditingMessageId(null)
             } else {
-                await BlogService.sendMessage(effectiveUserId, body, isTask)
+                await BlogService.sendMessage(effectiveUserId, body, isTask, {
+                    visibility,
+                    recipient_id: visibility === 'PRIVATE' ? (targetUser?.id || null) : null,
+                    recipient_name: visibility === 'PRIVATE' ? (targetUser?.full_name || targetUser?.email || null) : null,
+                    recipient_email: visibility === 'PRIVATE' ? (targetUser?.email || null) : null,
+                    recipient_role: visibility === 'PRIVATE' ? (targetUser?.role || null) : null,
+                    author_email: currentEmail || null,
+                    author_name: currentName
+                })
+
+                if (visibility === 'PRIVATE' && targetUser) {
+                    await pushNotification({
+                        type: 'PRIVATE_TASK',
+                        title: isTask ? 'Nueva Tarea Privada Asignada' : 'Nuevo Mensaje Privado en Bitácora',
+                        message: `${currentName} te envió un registro privado: "${body.trim().slice(0, 140)}"`,
+                        target_user_ids: [targetUser.id],
+                        target_user_emails: [targetUser.email],
+                        created_by_name: currentName,
+                        created_by_email: currentEmail || null,
+                        link: '/dashboard/chat'
+                    })
+                }
             }
             await loadInitialData()
         } catch (error) {
@@ -120,17 +170,36 @@ export default function BlogTareasPage() {
     const canCreateTasks = ['SUPER_ADMIN', 'DIRECTOR_OPERATIVO', 'GERENTE', 'SUPERINTENDENTE', 'JEFE_MINA', 'JEFE_PLANEACION', 'JEFE_RH'].includes(sysRole || 'SUPER_ADMIN')
     const canResolveTasks = ['SUPERVISOR', 'SUPERINTENDENTE', 'GERENTE', 'JEFE_MINA', 'SUPER_ADMIN'].includes(sysRole || 'SUPER_ADMIN')
 
-    const filteredMessages = messages.filter(m => {
+    const canAccessMessage = (m: BlogMessage) => {
+        const msgVis = m.visibility || 'PUBLIC'
+        if (msgVis !== 'PRIVATE') return true
+        const isSender =
+            m.author_id === effectiveUserId ||
+            (currentEmail && m.author_email?.toLowerCase() === currentEmail)
+        const isRecipient =
+            m.recipient_id === effectiveUserId ||
+            (sysUserId && m.recipient_id === sysUserId) ||
+            (currentEmail && m.recipient_email?.toLowerCase() === currentEmail)
+        return Boolean(isSender || isRecipient)
+    }
+
+    const visibleMessages = messages.filter(canAccessMessage)
+
+    const filteredMessages = visibleMessages.filter(m => {
+        const msgVis = m.visibility || 'PUBLIC'
+        if (filterType === 'PUBLIC') return msgVis === 'PUBLIC'
+        if (filterType === 'PRIVATE') return msgVis === 'PRIVATE'
         if (filterType === 'TASKS') return m.is_task
         if (filterType === 'PENDING') return m.is_task && m.task_status === 'PENDING'
         return true
     })
 
-    const pendingCount = messages.filter(m => m.is_task && m.task_status === 'PENDING' && !m.is_deleted).length
-    const completedCount = messages.filter(m => m.is_task && m.task_status === 'COMPLETED' && !m.is_deleted).length
+    const pendingCount = visibleMessages.filter(m => m.is_task && m.task_status === 'PENDING' && !m.is_deleted).length
+    const completedCount = visibleMessages.filter(m => m.is_task && m.task_status === 'COMPLETED' && !m.is_deleted).length
+    const privateCount = visibleMessages.filter(m => m.visibility === 'PRIVATE' && !m.is_deleted).length
 
     return (
-        <div className="h-[calc(100vh-8rem)] flex flex-col md:flex-row gap-6">
+        <div className="min-h-[540px] lg:h-[calc(100vh-8rem)] flex flex-col md:flex-row gap-6">
             {/* Sidebar de Resumen y Filtros */}
             <div className="w-full md:w-80 flex flex-col gap-4 shrink-0">
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
@@ -164,7 +233,9 @@ export default function BlogTareasPage() {
                         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Filtrar vista:</span>
                         <div className="flex flex-col gap-1.5">
                             {[
-                                { id: 'ALL', label: '📋 Todos los Mensajes y Consignas' },
+                                { id: 'ALL', label: '📋 Todos (Públicos y Tus Privados)' },
+                                { id: 'PUBLIC', label: '🌐 Solo Públicos (Todo el Equipo)' },
+                                { id: 'PRIVATE', label: `🔒 Privados (${privateCount})` },
                                 { id: 'TASKS', label: '📌 Solo Tareas Operativas' },
                                 { id: 'PENDING', label: '⏳ Tareas Pendientes de Turno' },
                             ].map((f) => (
@@ -219,7 +290,9 @@ export default function BlogTareasPage() {
                         </div>
                     ) : (
                         filteredMessages.map((msg, idx) => {
-                            const isMe = msg.author_id === effectiveUserId
+                            const isMe = msg.author_id === effectiveUserId ||
+                                (sysUserId && msg.author_id === sysUserId) ||
+                                Boolean(currentEmail && msg.author_email?.toLowerCase() === currentEmail)
                             const showAvatar = idx === 0 || filteredMessages[idx - 1].author_id !== msg.author_id
                             const isDeleted = msg.is_deleted
 
@@ -257,12 +330,23 @@ export default function BlogTareasPage() {
                                                 </div>
                                             )}
 
-                                            {msg.is_task && !isDeleted && (
-                                                <div className="flex items-center gap-1.5 text-xs font-black text-amber-500 mb-2 uppercase tracking-wider bg-slate-950/80 w-fit px-2.5 py-1 rounded-md border border-amber-500/30">
-                                                    <Info size={13} />
-                                                    Consigna / Tarea Operativa
-                                                </div>
-                                            )}
+                                            <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                                                {msg.visibility === 'PRIVATE' ? (
+                                                    <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-violet-500/20 text-violet-300 border border-violet-500/40">
+                                                        <Lock size={11} /> Privado • {isMe ? `Para: ${msg.recipient_name || 'Destinatario'}` : `De: ${msg.author_name || msg.author?.nickname || 'Emisor'} (Solo para ti)`}
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-slate-950/60 text-slate-400 border border-slate-700/60">
+                                                        <Globe size={11} /> Público
+                                                    </span>
+                                                )}
+                                                {msg.is_task && !isDeleted && (
+                                                    <span className="inline-flex items-center gap-1.5 text-[10px] font-black text-amber-500 uppercase tracking-wider bg-slate-950/80 px-2 py-0.5 rounded-md border border-amber-500/30">
+                                                        <Info size={11} />
+                                                        Consigna / Tarea Operativa
+                                                    </span>
+                                                )}
+                                            </div>
 
                                             <p className={`whitespace-pre-wrap leading-relaxed font-medium ${isDeleted ? 'line-through text-slate-500 italic' : ''}`}>
                                                 {isDeleted ? 'Este mensaje fue eliminado.' : msg.body}
@@ -316,7 +400,51 @@ export default function BlogTareasPage() {
                 </div>
 
                 {/* Input Area */}
-                <div className="p-4 border-t border-slate-800 bg-slate-950/60 shrink-0 html2pdf__ignore">
+                <div className="p-4 border-t border-slate-800 bg-slate-950/60 shrink-0 html2pdf__ignore space-y-2.5">
+                    {!editingMessageId && (
+                        <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[11px] font-bold uppercase text-slate-400">Visibilidad:</span>
+                            <button
+                                type="button"
+                                onClick={() => setVisibility('PUBLIC')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-all cursor-pointer ${
+                                    visibility === 'PUBLIC'
+                                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                                        : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'
+                                }`}
+                            >
+                                <Globe size={13} /> Público (Todos)
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setVisibility('PRIVATE')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-all cursor-pointer ${
+                                    visibility === 'PRIVATE'
+                                        ? 'bg-violet-500/20 text-violet-300 border-violet-500/50'
+                                        : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'
+                                }`}
+                            >
+                                <Lock size={13} /> Privado (Usuario específico)
+                            </button>
+
+                            {visibility === 'PRIVATE' && (
+                                <select
+                                    value={recipientId}
+                                    onChange={e => setRecipientId(e.target.value)}
+                                    className="bg-slate-900 border border-violet-500/50 rounded-lg px-3 py-1.5 text-xs text-white font-semibold outline-none focus:border-violet-400 max-w-xs"
+                                >
+                                    <option value="">Selecciona destinatario privado...</option>
+                                    {teamUsers
+                                        .filter(u => u.id !== effectiveUserId && u.email.toLowerCase() !== currentEmail)
+                                        .map(u => (
+                                            <option key={u.id} value={u.id}>
+                                                {u.full_name} ({u.role.replace(/_/g, ' ')})
+                                            </option>
+                                        ))}
+                                </select>
+                            )}
+                        </div>
+                    )}
                     <form onSubmit={handleSendMessage} className="flex gap-3">
                         <div className="flex-1 bg-slate-900 border-2 border-slate-700 rounded-xl flex items-center px-2 focus-within:border-amber-500 transition-all">
 

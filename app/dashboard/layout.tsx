@@ -84,10 +84,10 @@ export default function DashboardLayout({
     }
 
     return (
-        <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
+        <div className="flex h-screen w-full bg-slate-950 text-slate-100 overflow-hidden font-sans">
             <Sidebar />
 
-            <div className="flex-1 flex flex-col md:ml-64 transition-all duration-300 relative">
+            <div className="flex-1 min-w-0 w-full flex flex-col overflow-hidden transition-all duration-300 relative">
                 {/* Barra láser de transición entre páginas */}
                 <AnimatePresence>
                     {routeChanging && (
@@ -104,7 +104,7 @@ export default function DashboardLayout({
 
                 <Topbar />
 
-                <main className="flex-1 overflow-auto p-4 md:p-6 pb-24 md:pb-6 relative">
+                <main className="flex-1 min-w-0 overflow-x-auto overflow-y-auto p-3 sm:p-4 md:p-6 pb-24 md:pb-6 relative">
                     <AnimatedBackground />
 
                     {/* Membrete Oficial para Exportación PDF / Impresión */}
@@ -138,16 +138,15 @@ export default function DashboardLayout({
                     </div>
 
                     {/* Contenido con animación de transición y validación estricta de vistas */}
-                    <div className="relative z-10">
-                        <AnimatePresence mode="wait">
-                            <motion.div
-                                key={pathname}
-                                initial={{ opacity: 0, y: 12 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -8 }}
-                                transition={{ duration: 0.25, ease: 'easeOut' }}
-                            >
-                                {isAuthorized ? (
+                    <div className="relative z-10 w-full min-w-0">
+                        <motion.div
+                            key={pathname}
+                            initial={{ opacity: 0.92, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.16, ease: 'easeOut' }}
+                            className="w-full min-w-0"
+                        >
+                            {isAuthorized ? (
                                     children
                                 ) : (
                                     <div className="flex flex-col items-center justify-center mt-16 text-center bg-slate-900 border border-rose-500/40 rounded-2xl p-8 max-w-lg mx-auto shadow-2xl">
@@ -178,8 +177,7 @@ export default function DashboardLayout({
                                         </div>
                                     </div>
                                 )}
-                            </motion.div>
-                        </AnimatePresence>
+                        </motion.div>
                     </div>
 
                     {/* Pie de Firmas Oficiales para Exportación PDF */}

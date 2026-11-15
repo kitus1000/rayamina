@@ -11,6 +11,13 @@ export interface BlogMessage {
     is_edited?: boolean
     is_deleted?: boolean
     created_at: string
+    visibility?: 'PUBLIC' | 'PRIVATE'
+    recipient_id?: string | null
+    recipient_name?: string | null
+    recipient_email?: string | null
+    recipient_role?: string | null
+    author_email?: string | null
+    author_name?: string | null
     author?: {
         nickname: string
         avatar_url: string
@@ -18,7 +25,18 @@ export interface BlogMessage {
     }
 }
 
+export interface SendBlogMessageOptions {
+    visibility?: 'PUBLIC' | 'PRIVATE'
+    recipient_id?: string | null
+    recipient_name?: string | null
+    recipient_email?: string | null
+    recipient_role?: string | null
+    author_email?: string | null
+    author_name?: string | null
+}
+
 const FALLBACK_KEY = 'ops_blog_tareas_store'
+const PRIVATE_STORE_KEY = 'ops_blog_private_store'
 
 const DEFAULT_MESSAGES: BlogMessage[] = [
     {
@@ -105,27 +123,46 @@ async function saveFallbackMessages(messages: BlogMessage[]) {
     }, { onConflict: 'key_name' })
 }
 
+async function getPrivateMessages(): Promise<BlogMessage[]> {
+    const { data } = await supabase
+        .from('sys_config')
+        .select('value_json')
+        .eq('key_name', PRIVATE_STORE_KEY)
+        .maybeSingle()
+
+    if (data?.value_json && Array.isArray(data.value_json)) {
+        return data.value_json as BlogMessage[]
+    }
+    return []
+}
+
+async function savePrivateMessages(messages: BlogMessage[]) {
+    await supabase.from('sys_config').upsert({
+        key_name: PRIVATE_STORE_KEY,
+        value_json: messages,
+        description: 'Mensajes y tareas privadas de bitácora por usuario destinatario'
+    }, { onConflict: 'key_name' })
+}
+
 export const BlogService = {
-    // 1. Obtener todos los mensajes del blog (con recuperación automática si falta FK o tabla)
+    // 1. Obtener todos los mensajes del blog (combinando tabla pública y almacén privado/respaldo)
     async getMessages(): Promise<BlogMessage[]> {
+        let publicRows: BlogMessage[] = []
         try {
             const { data, error } = await supabase
                 .from('blog_tareas')
                 .select('*')
                 .order('created_at', { ascending: true })
 
-            if (!error && data) {
+            if (!error && data && data.length > 0) {
                 const usersMap = await getUsersMap()
-                if (data.length === 0) {
-                    const fallback = await getFallbackMessages()
-                    return fallback
-                }
-                return data.map((row: any) => ({
+                publicRows = data.map((row: any) => ({
                     ...row,
+                    visibility: row.visibility || 'PUBLIC',
                     author: usersMap[row.author_id] || {
-                        nickname: 'Operaciones Mina',
+                        nickname: row.author_name || 'Operaciones Mina',
                         avatar_url: '',
-                        email: 'mina@rayamina.com'
+                        email: row.author_email || 'mina@rayamina.com'
                     }
                 })) as BlogMessage[]
             }
@@ -133,19 +170,62 @@ export const BlogService = {
             console.warn('Usando almacén de respaldo para blog_tareas:', e)
         }
 
-        return await getFallbackMessages()
+        const [fallback, privateMsgs] = await Promise.all([
+            getFallbackMessages(),
+            getPrivateMessages()
+        ])
+
+        const mergedMap = new Map<string, BlogMessage>()
+        publicRows.forEach(m => mergedMap.set(m.id, m))
+        fallback.forEach(m => {
+            if (!mergedMap.has(m.id)) mergedMap.set(m.id, m)
+        })
+        privateMsgs.forEach(m => {
+            mergedMap.set(m.id, { ...m, visibility: 'PRIVATE' })
+        })
+        return Array.from(mergedMap.values()).sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        )
     },
 
-    // 2. Enviar Mensaje Normal o Tarea
-    async sendMessage(authorId: string, body: string, isTask: boolean = false) {
+    // 2. Enviar Mensaje Normal o Tarea (Público o Privado)
+    async sendMessage(
+        authorId: string,
+        body: string,
+        isTask: boolean = false,
+        options?: SendBlogMessageOptions
+    ) {
         const usersMap = await getUsersMap()
+        const visibility = options?.visibility || 'PUBLIC'
         const authorInfo = usersMap[authorId] || {
-            nickname: 'Supervisor / Jefe',
+            nickname: options?.author_name || 'Supervisor / Jefe',
             avatar_url: '',
-            email: 'operaciones@rayamina.com'
+            email: options?.author_email || 'operaciones@rayamina.com'
         }
 
-        // Intentar insertar en tabla primaria si es UUID válido
+        // Mensajes privados se guardan en almacén privado aislado (ops_blog_private_store)
+        if (visibility === 'PRIVATE') {
+            const currentPriv = await getPrivateMessages()
+            const newPrivMsg: BlogMessage = {
+                id: 'priv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+                author_id: authorId,
+                body: body.trim(),
+                is_task: isTask,
+                task_status: isTask ? 'PENDING' : null,
+                created_at: new Date().toISOString(),
+                visibility: 'PRIVATE',
+                recipient_id: options?.recipient_id || null,
+                recipient_name: options?.recipient_name || null,
+                recipient_email: options?.recipient_email || null,
+                recipient_role: options?.recipient_role || null,
+                author_email: options?.author_email || authorInfo.email,
+                author_name: options?.author_name || authorInfo.nickname,
+                author: authorInfo
+            }
+            await savePrivateMessages([...currentPriv, newPrivMsg])
+            return newPrivMsg
+        }
+
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(authorId)
         if (isUuid) {
             const { data, error } = await supabase
@@ -160,19 +240,22 @@ export const BlogService = {
                 .single()
 
             if (!error && data) {
-                return { ...data, author: authorInfo }
+                return { ...data, visibility: 'PUBLIC', author: authorInfo }
             }
         }
 
-        // Fallback en sys_config
+        // Almacén JSON público (ops_blog_tareas_store)
         const current = await getFallbackMessages()
         const newMsg: BlogMessage = {
-            id: 'msg-' + Date.now(),
+            id: 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
             author_id: authorId,
             body: body.trim(),
             is_task: isTask,
             task_status: isTask ? 'PENDING' : null,
             created_at: new Date().toISOString(),
+            visibility: 'PUBLIC',
+            author_email: options?.author_email || authorInfo.email,
+            author_name: options?.author_name || authorInfo.nickname,
             author: authorInfo
         }
         const updated = [...current, newMsg]
@@ -195,6 +278,17 @@ export const BlogService = {
 
         if (!error && data) return data
 
+        if (messageId.startsWith('priv-')) {
+            const priv = await getPrivateMessages()
+            const updatedPriv = priv.map(m =>
+                m.id === messageId
+                    ? { ...m, task_status: status, resolved_by: resolverId, resolved_at: new Date().toISOString() }
+                    : m
+            )
+            await savePrivateMessages(updatedPriv)
+            return updatedPriv.find(m => m.id === messageId)
+        }
+
         const current = await getFallbackMessages()
         const updated = current.map(m =>
             m.id === messageId
@@ -207,6 +301,15 @@ export const BlogService = {
 
     // 4. Editar mensaje
     async editMessage(messageId: string, newBody: string) {
+        if (messageId.startsWith('priv-')) {
+            const priv = await getPrivateMessages()
+            const updatedPriv = priv.map(m =>
+                m.id === messageId ? { ...m, body: newBody.trim(), is_edited: true } : m
+            )
+            await savePrivateMessages(updatedPriv)
+            return updatedPriv.find(m => m.id === messageId)
+        }
+
         const { data, error } = await supabase
             .from('blog_tareas')
             .update({
@@ -230,6 +333,15 @@ export const BlogService = {
 
     // 5. Borrado lógico de mensaje/tarea (Tachado)
     async deleteMessage(messageId: string) {
+        if (messageId.startsWith('priv-')) {
+            const priv = await getPrivateMessages()
+            const updatedPriv = priv.map(m =>
+                m.id === messageId ? { ...m, is_deleted: true } : m
+            )
+            await savePrivateMessages(updatedPriv)
+            return updatedPriv.find(m => m.id === messageId)
+        }
+
         const { data, error } = await supabase
             .from('blog_tareas')
             .update({

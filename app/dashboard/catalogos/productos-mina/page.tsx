@@ -263,7 +263,7 @@ export default function ProductsMinaPage() {
             {loading ? (
                 <div className="text-slate-500 py-10 text-center animate-pulse">Cargando catálogo...</div>
             ) : (
-                <div className="bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden">
+                <div className="bg-slate-900/50 border border-slate-800 rounded-xl overflow-x-auto">
                     <table className="w-full text-left text-sm text-slate-300">
                         <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider font-semibold">
                             <tr>

@@ -18,7 +18,7 @@ import {
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { DEFAULT_ROLE_VIEWS } from '@/lib/auth-context'
-import { ALL_SYSTEM_MODULES } from '../visiones/page'
+import { ALL_SYSTEM_MODULES } from '@/lib/system-modules'
 import { toast } from 'sonner'
 
 type SysRoleConfig = {
@@ -105,7 +105,7 @@ export default function UsuariosConfiguracionPage() {
         setEditingUser({
             ...u,
             views_json:
-                Array.isArray(u.views_json) && u.views_json.length > 0
+                Array.isArray(u.views_json)
                     ? u.views_json
                     : DEFAULT_ROLE_VIEWS[u.role] || [],
         })
@@ -138,7 +138,7 @@ export default function UsuariosConfiguracionPage() {
 
         const cleanEmail = editingUser.email.trim().toLowerCase()
         const viewsToSave =
-            Array.isArray(editingUser.views_json) && editingUser.views_json.length > 0
+            Array.isArray(editingUser.views_json)
                 ? editingUser.views_json
                 : DEFAULT_ROLE_VIEWS[editingUser.role] || []
 
@@ -172,6 +172,9 @@ export default function UsuariosConfiguracionPage() {
 
                 if (error) throw error
                 toast.success('Usuario creado y habilitado para Web y APK Android')
+            }
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('raya-views-updated'))
             }
             setIsUserModalOpen(false)
             loadData()
@@ -511,9 +514,9 @@ export default function UsuariosConfiguracionPage() {
                                             }`}
                                         >
                                             <div className="min-w-0">
-                                                <div className="text-xs font-bold truncate">{mod.name}</div>
+                                                <div className="text-xs font-bold truncate">{mod.label}</div>
                                                 <div className="text-[10px] text-amber-400 truncate">
-                                                    {mod.apkScreen}
+                                                    APK: {mod.apkModule}
                                                 </div>
                                             </div>
                                             <input

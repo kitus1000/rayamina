@@ -3,6 +3,12 @@
 import React, { useState, useEffect } from 'react'
 import { Calendar, Clock, MapPin, Users, ChevronRight, FileText, CheckCircle, AlertCircle, Plus, Trash2, X, Save } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import {
+    pushNotification,
+    saveReportCreatorMeta,
+    appendReportRevision,
+    getSquadSupervisorsMeta
+} from '@/lib/notifications-service'
 import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth-context'
 import { useRouter } from 'next/navigation'
@@ -291,6 +297,11 @@ export default function DailyReportsPage() {
 
         setLoading(true)
         try {
+            const matchedCuad = cuadrillas.find(c => c.id === selectedCuadrilla)
+            const metaMap = await getSquadSupervisorsMeta()
+            const squadMeta = metaMap[selectedCuadrilla]
+            const effectiveSupId = matchedCuad?.supervisor_id || squadMeta?.supervisor_employee_id || null
+
             // 1. CREATE REPORT
             const { data: report, error: errReport } = await supabase
                 .from('ops_daily_reports')
@@ -298,10 +309,11 @@ export default function DailyReportsPage() {
                     fecha,
                     turno_id: selectedTurno,
                     cuadrilla_id: selectedCuadrilla,
-                    supervisor_id: null,
+                    supervisor_id: effectiveSupId,
                     mine_site_id: selectedMina,
                     observaciones_generales: supervisorComments,
-                    estado: 'EN_REVISION'
+                    estado: 'EN_REVISION',
+                    status: 'EN_REVISION'
                 })
                 .select()
                 .single()
@@ -402,7 +414,44 @@ export default function DailyReportsPage() {
                 }
             }
 
-            toast.success('Reporte Guardado Correctamente')
+            const { data: authInfo } = await supabase.auth.getUser()
+            const currentEmail = authInfo?.user?.email || null
+            const { data: sysSender } = currentEmail
+                ? await supabase.from('sys_users').select('id, email, full_name, role').eq('email', currentEmail).maybeSingle()
+                : { data: null }
+            const senderName = sysSender?.full_name || currentEmail || 'Supervisión'
+
+            await saveReportCreatorMeta(report.id, {
+                creator_user_id: sysSender?.id || null,
+                creator_email: currentEmail,
+                creator_name: senderName,
+                creator_role: sysSender?.role || 'SUPERVISOR',
+                cuadrilla_id: selectedCuadrilla,
+                supervisor_employee_id: matchedCuad?.supervisor_id || squadMeta?.supervisor_employee_id || null,
+                supervisor_name: squadMeta?.supervisor_employee_name || squadMeta?.supervisor_user_name || null,
+                supervisor_user_email: squadMeta?.supervisor_user_email || null
+            })
+
+            await appendReportRevision(report.id, {
+                edited_by_name: senderName,
+                edited_by_email: currentEmail,
+                edited_by_role: sysSender?.role || 'SUPERVISOR',
+                approved_with_changes: false,
+                changes: [`Reporte enviado a revisión (${activities.length} actividad(es), ${attendanceList.length} elemento(s)).`]
+            })
+
+            await pushNotification({
+                type: 'REPORT_SUBMITTED',
+                title: `Nuevo Reporte por Revisar (${fecha})`,
+                message: `${senderName} envió reporte diario de ${matchedCuad?.nombre || 'Cuadrilla'} para revisión y aprobación.`,
+                details: activities.slice(0, 4).map(a => `${a.producto_nombre}: ${a.cantidad_total} ${a.unidad}`),
+                target_roles: ['JEFE_PLANEACION', 'GERENTE', 'SUPERINTENDENTE', 'DIRECTOR_OPERATIVO'],
+                created_by_name: senderName,
+                created_by_email: currentEmail,
+                link: `/dashboard/operacion/reportes-diarios/${report.id}`
+            })
+
+            toast.success('Reporte Guardado Correctamente y Enviado a Revisión')
             window.location.href = '/dashboard/operacion/reportes-diarios'
 
         } catch (error: any) {

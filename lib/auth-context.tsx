@@ -77,13 +77,32 @@ export function checkPathAllowed(
     if (cleanPath === '/dashboard/profile') return true
 
     const effectiveViews =
-        Array.isArray(allowedViews) && allowedViews.length > 0
+        Array.isArray(allowedViews)
             ? allowedViews
             : DEFAULT_ROLE_VIEWS[sysRole] || []
 
     return effectiveViews.some((av) => {
         if (cleanPath === av) return true
-        if (av !== '/dashboard' && cleanPath.startsWith(av + '/')) return true
+        if (
+            av !== '/dashboard' &&
+            av !== '/dashboard/catalogos' &&
+            av !== '/dashboard/configuracion' &&
+            cleanPath.startsWith(av + '/')
+        ) {
+            return true
+        }
+        if (
+            av === '/dashboard/catalogos' &&
+            [
+                '/dashboard/catalogos/minas',
+                '/dashboard/catalogos/unidades',
+                '/dashboard/catalogos/empresas',
+                '/dashboard/catalogos/turnos',
+                '/dashboard/catalogos/puestos-roles',
+            ].some((sub) => cleanPath === sub || cleanPath.startsWith(sub + '/'))
+        ) {
+            return true
+        }
         return false
     })
 }
@@ -94,7 +113,7 @@ export function resolveFirstAllowedPath(
 ): string {
     if (sysRole === 'SUPER_ADMIN') return '/dashboard'
     const effectiveViews =
-        Array.isArray(allowedViews) && allowedViews.length > 0
+        Array.isArray(allowedViews)
             ? allowedViews
             : sysRole
             ? DEFAULT_ROLE_VIEWS[sysRole] || []
@@ -173,7 +192,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 setFullName(finalUser.full_name || finalUser.nickname || finalUser.email)
 
                 const configuredViews =
-                    Array.isArray(finalUser.views_json) && finalUser.views_json.length > 0
+                    Array.isArray(finalUser.views_json)
                         ? finalUser.views_json
                         : DEFAULT_ROLE_VIEWS[finalUser.role] || []
 
@@ -283,14 +302,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return () => subscription.unsubscribe()
     }, [fetchUserConfig])
 
-    const refreshUserConfig = async () => {
+    const refreshUserConfig = useCallback(async () => {
         if (user?.email) {
             const valid = await fetchUserConfig(user.email)
             if (!valid) {
                 await signOut()
             }
         }
-    }
+    }, [user?.email, fetchUserConfig])
+
+    // Sincronización en vivo cuando se actualizan las vistas desde Configuración o al volver a enfocar la pestaña
+    useEffect(() => {
+        const handleViewsUpdated = () => {
+            if (user?.email) {
+                fetchUserConfig(user.email)
+            }
+        }
+        const handleVisibility = () => {
+            if (document.visibilityState === 'visible' && user?.email) {
+                fetchUserConfig(user.email)
+            }
+        }
+        window.addEventListener('raya-views-updated', handleViewsUpdated)
+        document.addEventListener('visibilitychange', handleVisibility)
+        return () => {
+            window.removeEventListener('raya-views-updated', handleViewsUpdated)
+            document.removeEventListener('visibilitychange', handleVisibility)
+        }
+    }, [user?.email, fetchUserConfig])
 
     const signInWithGoogle = async () => {
         await supabase.auth.signInWithOAuth({

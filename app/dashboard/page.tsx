@@ -51,6 +51,8 @@ export default function DashboardPage() {
     useEffect(() => {
         if (isJefaturaOrAbove) {
             loadDashboardStats()
+        } else {
+            setLoading(false)
         }
     }, [activeTab, isJefaturaOrAbove])
 

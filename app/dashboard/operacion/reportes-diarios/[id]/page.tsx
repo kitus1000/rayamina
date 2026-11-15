@@ -9,6 +9,14 @@ import {
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
+import {
+    pushNotification,
+    getReportCreatorMeta,
+    getReportRevisions,
+    appendReportRevision,
+    ReportCreatorMeta,
+    ReportRevisionEntry
+} from '@/lib/notifications-service'
 import { toast } from 'sonner'
 
 type ReportDetail = {
@@ -38,7 +46,17 @@ type ReportDetail = {
 
 export default function ReportDetail({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params)
-    const { permissions, sysRole } = useAuth()
+    const { permissions, sysRole, user, fullName } = useAuth()
+    const [creatorMeta, setCreatorMeta] = useState<ReportCreatorMeta | null>(null)
+    const [revisions, setRevisions] = useState<ReportRevisionEntry[]>([])
+
+    const canReviewApprove = [
+        'JEFE_PLANEACION',
+        'GERENTE',
+        'SUPERINTENDENTE',
+        'DIRECTOR_OPERATIVO',
+        'SUPER_ADMIN'
+    ].includes(sysRole || '') || Boolean(permissions?.can_approve_reports && sysRole !== 'JEFE_MINA')
     const [report, setReport] = useState<ReportDetail | null>(null)
     const [loading, setLoading] = useState(true)
     const [isExporting, setIsExporting] = useState(false)
@@ -76,16 +94,49 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
             console.error('Error cargando detalle:', error)
         } else {
             setReport(data as any)
+            const [cMeta, revs] = await Promise.all([
+                getReportCreatorMeta(id as string),
+                getReportRevisions(id as string)
+            ])
+            setCreatorMeta(cMeta)
+            setRevisions(revs)
         }
         setLoading(false)
     }
 
     const handleApprove = async () => {
-        if (!confirm('¿Estás seguro de APROBAR este reporte? Ya no podrá ser editado libremente.')) return
+        if (!confirm('¿Confirmas que los datos cuadran y deseas APROBAR este reporte?')) return
         try {
-            const { error } = await supabase.from('ops_daily_reports').update({ estado: 'APROBADO' }).eq('id', id)
+            const { error } = await supabase
+                .from('ops_daily_reports')
+                .update({ estado: 'APROBADO', status: 'APROBADO' })
+                .eq('id', id)
             if (error) throw error
-            toast.success('Reporte aprobado correctamente')
+
+            const reviewerName = fullName || user?.email || sysRole || 'Revisión Operativa'
+            await appendReportRevision(id as string, {
+                edited_by_name: reviewerName,
+                edited_by_email: user?.email || null,
+                edited_by_role: sysRole || null,
+                approved_with_changes: false,
+                changes: ['Datos verificados y aprobados sin modificaciones.']
+            })
+
+            await pushNotification({
+                type: 'REPORT_APPROVED',
+                title: `Reporte Aprobado (${report?.fecha || ''})`,
+                message: `Tus datos cuadraron correctamente. ${reviewerName} aprobó el reporte de ${report?.cuadrilla?.nombre || 'tu cuadrilla'}.`,
+                details: ['Estado actualizado a APROBADO sin modificaciones.'],
+                target_user_ids: creatorMeta?.creator_user_id ? [creatorMeta.creator_user_id] : undefined,
+                target_user_emails: [creatorMeta?.creator_email, creatorMeta?.supervisor_user_email].filter(Boolean) as string[],
+                target_employee_id: creatorMeta?.supervisor_employee_id || null,
+                target_employee_name: creatorMeta?.supervisor_name || null,
+                created_by_name: reviewerName,
+                created_by_email: user?.email || null,
+                link: `/dashboard/operacion/reportes-diarios/${id}`
+            })
+
+            toast.success('Reporte aprobado y enviado a supervisión')
             loadData()
         } catch (error: any) {
             toast.error('Error al aprobar: ' + error.message)
@@ -105,11 +156,37 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
             const { error } = await supabase.from('ops_daily_reports')
                 .update({
                     estado: 'CORRECCION_SOLICITADA',
+                    status: 'CORRECCION_SOLICITADA',
                     observaciones_generales: newComments
                 })
                 .eq('id', id)
 
             if (error) throw error
+
+            const reviewerName = fullName || user?.email || sysRole || 'Revisión Operativa'
+            await appendReportRevision(id as string, {
+                edited_by_name: reviewerName,
+                edited_by_email: user?.email || null,
+                edited_by_role: sysRole || null,
+                approved_with_changes: false,
+                changes: [`Se solicitó corrección al supervisor/emisor: ${motivo}`],
+                note: motivo
+            })
+
+            await pushNotification({
+                type: 'REPORT_CORRECTED',
+                title: `Corrección Solicitada en Reporte (${report?.fecha || ''})`,
+                message: `${reviewerName} devolvió el reporte para revisión: "${motivo}"`,
+                details: [`Observación: ${motivo}`],
+                target_user_ids: creatorMeta?.creator_user_id ? [creatorMeta.creator_user_id] : undefined,
+                target_user_emails: [creatorMeta?.creator_email, creatorMeta?.supervisor_user_email].filter(Boolean) as string[],
+                target_employee_id: creatorMeta?.supervisor_employee_id || null,
+                target_employee_name: creatorMeta?.supervisor_name || null,
+                created_by_name: reviewerName,
+                created_by_email: user?.email || null,
+                link: `/dashboard/operacion/reportes-diarios/${id}/editar`
+            })
+
             toast.success('Reporte enviado a corrección')
             loadData()
         } catch (error: any) {
@@ -182,22 +259,29 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
                             Editar Reporte
                         </Link>
 
-                        {(report.status === 'EN_REVISION' || report.status === 'BORRADOR' || report.status === 'CORRECCION_SOLICITADA') && permissions?.can_approve_reports && (
+                        {(report.status === 'EN_REVISION' || report.status === 'BORRADOR' || report.status === 'CORRECCION_SOLICITADA') && canReviewApprove && (
                             <>
+                                <Link
+                                    href={`/dashboard/operacion/reportes-diarios/${report.id}/editar?reviewApprove=1`}
+                                    className="bg-amber-500 hover:bg-amber-400 text-slate-950 px-4 py-2 rounded-lg flex items-center gap-2 transition-all shadow-lg font-black"
+                                >
+                                    <Edit2 size={16} />
+                                    Corregir Datos y Aprobar
+                                </Link>
                                 {report.status !== 'CORRECCION_SOLICITADA' && (
                                     <button
                                         onClick={handleRequestCorrection}
-                                        className="bg-rose-950/50 border border-rose-900/50 hover:bg-rose-900/60 text-rose-400 px-4 py-2 rounded-lg flex items-center gap-2 transition-all font-bold"
+                                        className="bg-rose-950/50 border border-rose-900/50 hover:bg-rose-900/60 text-rose-400 px-4 py-2 rounded-lg flex items-center gap-2 transition-all font-bold cursor-pointer"
                                     >
-                                        Solicitar Corrección
+                                        Devolver
                                     </button>
                                 )}
                                 <button
                                     onClick={handleApprove}
-                                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-lg flex items-center gap-2 transition-all shadow-lg shadow-emerald-900/20 font-black"
+                                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-lg flex items-center gap-2 transition-all shadow-lg shadow-emerald-900/20 font-black cursor-pointer"
                                 >
                                     <ShieldCheck size={18} />
-                                    Aprobar Reporte
+                                    Datos Cuadran — Aprobar
                                 </button>
                             </>
                         )}
@@ -335,6 +419,48 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
                             </p>
                         </div>
                     </div>
+
+                    {/* REVISION & CORRECTIONS AUDIT LOG */}
+                    {(creatorMeta || revisions.length > 0) && (
+                        <div className="mt-8">
+                            <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-4">
+                                <ShieldCheck className="text-emerald-400" size={20} /> Trazabilidad y Correcciones de Revisión
+                            </h3>
+                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+                                {creatorMeta && (
+                                    <div className="text-xs text-slate-300 bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2.5 flex flex-wrap gap-4">
+                                        <span><strong>Enviado por:</strong> {creatorMeta.creator_name || creatorMeta.creator_email || 'Supervisión'} ({creatorMeta.creator_role || 'CAMPO'})</span>
+                                        {creatorMeta.supervisor_name && (
+                                            <span><strong>Supervisor de cuadrilla:</strong> {creatorMeta.supervisor_name}</span>
+                                        )}
+                                    </div>
+                                )}
+                                {revisions.map(rev => (
+                                    <div key={rev.id} className="border-l-2 border-amber-500 pl-3.5 py-1 space-y-1.5">
+                                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                                            <span className="font-bold text-white">
+                                                {rev.edited_by_name} {rev.edited_by_role ? `(${rev.edited_by_role.replace(/_/g, ' ')})` : ''}
+                                                {rev.approved_with_changes && (
+                                                    <span className="ml-2 px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-black uppercase">
+                                                        Corregido y Aprobado
+                                                    </span>
+                                                )}
+                                            </span>
+                                            <span className="text-slate-500">{new Date(rev.edited_at).toLocaleString('es-MX')}</span>
+                                        </div>
+                                        {rev.note && (
+                                            <p className="text-xs text-amber-300 italic">Nota: {rev.note}</p>
+                                        )}
+                                        <ul className="space-y-1">
+                                            {rev.changes.map((c, idx) => (
+                                                <li key={idx} className="text-xs text-slate-300">• {c}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

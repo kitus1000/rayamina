@@ -121,7 +121,7 @@ export default function UnitsPage() {
             {loading ? (
                 <div className="text-slate-500">Cargando unidades...</div>
             ) : (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden max-h-[600px] overflow-y-auto custom-scrollbar">
+                <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto max-h-[600px] overflow-y-auto custom-scrollbar">
                     <table className="w-full text-left text-sm text-slate-400">
                         <thead className="bg-slate-950 text-slate-200 uppercase tracking-wider font-semibold">
                             <tr>

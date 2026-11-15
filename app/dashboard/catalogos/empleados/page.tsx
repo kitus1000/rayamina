@@ -224,8 +224,7 @@ export default function EmployeesPage() {
 
             alert(isEditMode ? 'Empleado actualizado' : 'Empleado creado')
             setIsModalOpen(false)
-            // Reload page to refresh assignments completely (simpler than complex state update)
-            window.location.reload()
+            await refresh()
 
         } catch (err: any) {
             console.error(err)
@@ -253,11 +252,11 @@ export default function EmployeesPage() {
 
     // Status Badge
     const StatusBadge = ({ status }: { status: string }) => (
-        <span className={`px-2 py-1 rounded-full text-xs font-bold ${status === 'ACTIVE'
+        <span className={`px-2 py-1 rounded-full text-xs font-bold ${(status === 'ACTIVE' || status === 'ACTIVO')
             ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
             : 'bg-slate-700 text-slate-400'
             }`}>
-            {status === 'ACTIVE' ? 'Activo' : 'Inactivo'}
+            {(status === 'ACTIVE' || status === 'ACTIVO') ? 'Activo' : 'Inactivo'}
         </span>
     )
 
@@ -298,7 +297,7 @@ export default function EmployeesPage() {
             {loading ? (
                 <div className="text-slate-500 animate-pulse">Cargando directorio...</div>
             ) : (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden max-h-[650px] overflow-y-auto custom-scrollbar">
+                <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto max-h-[650px] overflow-y-auto custom-scrollbar">
                     <table className="w-full text-left text-sm text-slate-400">
                         <thead className="bg-slate-950 text-slate-200 uppercase tracking-wider font-semibold sticky top-0 z-10">
                             <tr>
@@ -327,11 +326,6 @@ export default function EmployeesPage() {
                                     <td className="px-6 py-3">
                                         <div className="flex flex-col items-start gap-1">
                                             <span className="text-slate-300 font-medium">{emp.cat_puestos?.nombre}</span>
-                                            {emp.cat_roles_operativos?.nombre && (
-                                                <span className="text-emerald-400 text-xs px-2 py-0.5 bg-emerald-900/30 rounded border border-emerald-500/30">
-                                                    {emp.cat_roles_operativos.nombre}
-                                                </span>
-                                            )}
                                             {emp.cat_roles_operativos?.nombre && (
                                                 <span className="text-emerald-400 text-xs px-2 py-0.5 bg-emerald-900/30 rounded border border-emerald-500/30">
                                                     {emp.cat_roles_operativos.nombre}

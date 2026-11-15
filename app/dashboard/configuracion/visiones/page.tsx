@@ -1,446 +1,579 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import Link from 'next/link'
-import {
-    Save,
-    Shield,
-    Users,
-    LayoutDashboard,
-    Pickaxe,
-    DollarSign,
-    FileText,
-    HardHat,
-    Settings,
-    MessageSquare,
-    Calendar,
-    ChevronRight,
-    Eye,
-    Smartphone,
-    RotateCcw,
-    CheckSquare,
-    Lock,
-    MapPin,
-    Coins,
-} from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
-import { DEFAULT_ROLE_VIEWS } from '@/lib/auth-context'
-import { toast } from 'sonner'
+import { DEFAULT_ROLE_VIEWS, useAuth } from '@/lib/auth-context'
+import { ALL_SYSTEM_MODULES } from '@/lib/system-modules'
+import {
+    Eye, Save, Shield, CheckSquare, Square, Users, CheckCircle2,
+    RotateCcw, Smartphone, Monitor, Search, AlertTriangle, Sparkles, Lock
+} from 'lucide-react'
+import { motion } from 'framer-motion'
 
-export const ALL_SYSTEM_MODULES = [
+interface SysUserRow {
+    id: string
+    email: string
+    full_name: string
+    nickname?: string | null
+    role: string
+    views_json: string[] | null
+    active: boolean
+}
+
+const ROLE_PRESETS: Array<{ id: string; label: string; paths: string[] }> = [
     {
-        pillar: '1. Jefatura y Dirección (Precios, Toneladas y Nómina)',
-        icon: LayoutDashboard,
-        path: '/dashboard',
-        name: 'Dashboard Ejecutivo & Financiero',
-        apkScreen: 'APK: Mando Ejecutivo (KPIs, Tonelaje y Costos)',
-        confidential: true,
+        id: 'SUPERVISOR',
+        label: 'Supervisor Campo',
+        paths: [
+            '/dashboard/catalogos/cuadrillas',
+            '/dashboard/operacion/reportes-diarios',
+            '/dashboard/operacion/reportes-diarios/nuevo',
+            '/dashboard/chat'
+        ]
     },
     {
-        pillar: '1. Jefatura y Dirección (Precios, Toneladas y Nómina)',
-        icon: DollarSign,
-        path: '/dashboard/nomina',
-        name: 'Pre-Nómina, Raya y Tarifas S-38',
-        apkScreen: 'APK: Pre-Nómina y Destajos S-38',
-        confidential: true,
+        id: 'JEFE_PLANEACION',
+        label: 'Planeación e Ing.',
+        paths: [
+            '/dashboard/semana',
+            '/dashboard/catalogos/ubicaciones',
+            '/dashboard/catalogos/productos-mina',
+            '/dashboard/operacion/reportes-diarios',
+            '/dashboard/chat'
+        ]
     },
     {
-        pillar: '2. Planeación e Ingeniería',
-        icon: Calendar,
-        path: '/dashboard/semana',
-        name: 'Planeación Semanal (Metas vs Ejecución)',
-        apkScreen: 'APK: Metas Semana 38 vs Ejecución',
-        confidential: false,
+        id: 'SUPERINTENDENTE',
+        label: 'Superintendente / Jefe Mina',
+        paths: [
+            '/dashboard',
+            '/dashboard/semana',
+            '/dashboard/catalogos/cuadrillas',
+            '/dashboard/catalogos/empleados',
+            '/dashboard/catalogos/equipos',
+            '/dashboard/operacion/reportes-diarios',
+            '/dashboard/operacion/reportes-diarios/nuevo',
+            '/dashboard/chat'
+        ]
     },
     {
-        pillar: '2. Planeación e Ingeniería',
-        icon: MapPin,
-        path: '/dashboard/catalogos/ubicaciones',
-        name: 'Frentes, Rebajes y Ubicaciones',
-        apkScreen: 'APK: Catálogo de Frentes y Rebajes',
-        confidential: false,
-    },
-    {
-        pillar: '2. Planeación e Ingeniería',
-        icon: Coins,
-        path: '/dashboard/catalogos/productos-mina',
-        name: 'Catálogo de Conceptos y Precios Unitarios',
-        apkScreen: 'APK: Conceptos de Mina y Tarifas',
-        confidential: true,
-    },
-    {
-        pillar: '3. Operación Mina (Campo)',
-        icon: Users,
-        path: '/dashboard/catalogos/cuadrillas',
-        name: 'Pizarra Táctica de Cuadrillas',
-        apkScreen: 'APK: Cancha Táctica de Cuadrillas',
-        confidential: false,
-    },
-    {
-        pillar: '3. Operación Mina (Campo)',
-        icon: HardHat,
-        path: '/dashboard/catalogos/empleados',
-        name: 'Fuerza Operativa (Plantilla de Mineros)',
-        apkScreen: 'APK: Fuerza Operativa y Personal',
-        confidential: false,
-    },
-    {
-        pillar: '4. Reportes y Seguridad',
-        icon: Pickaxe,
-        path: '/dashboard/operacion/reportes-diarios',
-        name: 'Reportes Diarios, Captura de Turno e Incidencias',
-        apkScreen: 'APK: Reportes Diarios + Captura 4 Pasos',
-        confidential: false,
-    },
-    {
-        pillar: '4. Reportes y Seguridad',
-        icon: MessageSquare,
-        path: '/dashboard/chat',
-        name: 'Bitácora Operativa, Tareas y Alertas de Seguridad',
-        apkScreen: 'APK: Bitácora y Seguridad en Vivo',
-        confidential: false,
-    },
-    {
-        pillar: '5. Administración y Sistema',
-        icon: FileText,
-        path: '/dashboard/catalogos',
-        name: 'Catálogos Maestros Completos',
-        apkScreen: 'APK: Todos los Catálogos Maestros',
-        confidential: false,
-    },
-    {
-        pillar: '5. Administración y Sistema',
-        icon: Users,
-        path: '/dashboard/configuracion/usuarios',
-        name: 'Control de Usuarios y Contraseñas',
-        apkScreen: 'Solo Web Admin (Creación de Usuarios)',
-        confidential: true,
-    },
-    {
-        pillar: '5. Administración y Sistema',
-        icon: Eye,
-        path: '/dashboard/configuracion/visiones',
-        name: 'Gestión de Visiones (Web + APK)',
-        apkScreen: 'Solo Web Admin (Asignación de Vistas)',
-        confidential: true,
-    },
-    {
-        pillar: '5. Administración y Sistema',
-        icon: Settings,
-        path: '/dashboard/configuracion',
-        name: 'Configuración General del Sistema',
-        apkScreen: 'Solo Web Admin',
-        confidential: true,
-    },
+        id: 'GERENTE',
+        label: 'Gerencia / Dirección',
+        paths: [
+            '/dashboard',
+            '/dashboard/nomina',
+            '/dashboard/nomina/tarifas',
+            '/dashboard/semana',
+            '/dashboard/catalogos/cuadrillas',
+            '/dashboard/catalogos/empleados',
+            '/dashboard/catalogos/equipos',
+            '/dashboard/catalogos/ubicaciones',
+            '/dashboard/catalogos/productos-mina',
+            '/dashboard/operacion/reportes-diarios',
+            '/dashboard/chat'
+        ]
+    }
 ]
 
-export default function VisionesPage() {
-    const [users, setUsers] = useState<any[]>([])
-    const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
+export default function ControlVisionesPage() {
+    const { refreshUserConfig, user: currentAuthUser, sysRole: currentRole } = useAuth()
+    const [users, setUsers] = useState<SysUserRow[]>([])
+    const [selectedUserId, setSelectedUserId] = useState<string>('')
     const [allowedPaths, setAllowedPaths] = useState<string[]>([])
+    const [userSearch, setUserSearch] = useState('')
+    const [moduleSearch, setModuleSearch] = useState('')
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
+    const [saveStatus, setSaveStatus] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
     useEffect(() => {
         fetchUsers()
     }, [])
 
-    const fetchUsers = async () => {
+    const fetchUsers = async (preserveSelectedId?: string) => {
         setLoading(true)
-        const { data } = await supabase
+        const { data, error } = await supabase
             .from('sys_users')
             .select('id, email, full_name, nickname, role, views_json, active')
-            .eq('active', true)
-            .order('email')
+            .order('full_name')
 
-        if (data) {
-            setUsers(data)
-            const params = new URLSearchParams(window.location.search)
-            const urlUserId = params.get('userId')
-            const targetUser = urlUserId ? data.find((u) => u.id === urlUserId) : data[0]
-            if (targetUser) {
-                setSelectedUserId(targetUser.id)
+        if (error) {
+            setSaveStatus({ type: 'err', text: 'Error cargando usuarios: ' + error.message })
+        } else if (data) {
+            const rows = data as SysUserRow[]
+            setUsers(rows)
+            if (rows.length > 0) {
+                const targetId = preserveSelectedId || selectedUserId || rows[0].id
+                const target = rows.find(u => u.id === targetId) || rows[0]
+                setSelectedUserId(target.id)
                 setAllowedPaths(
-                    Array.isArray(targetUser.views_json) && targetUser.views_json.length > 0
-                        ? targetUser.views_json
-                        : DEFAULT_ROLE_VIEWS[targetUser.role] || []
+                    Array.isArray(target.views_json)
+                        ? target.views_json
+                        : DEFAULT_ROLE_VIEWS[target.role] || []
                 )
             }
         }
         setLoading(false)
     }
 
-    const handleSelectUser = (u: any) => {
+    const handleSelectUser = (u: SysUserRow) => {
         setSelectedUserId(u.id)
-        setAllowedPaths(
-            Array.isArray(u.views_json) && u.views_json.length > 0
-                ? u.views_json
-                : DEFAULT_ROLE_VIEWS[u.role] || []
+        setSaveStatus(null)
+        const views = Array.isArray(u.views_json)
+            ? u.views_json
+            : DEFAULT_ROLE_VIEWS[u.role] || []
+        setAllowedPaths(views)
+    }
+
+    const selectedUser = users.find(u => u.id === selectedUserId)
+    const isSuperAdminTarget = selectedUser?.role === 'SUPER_ADMIN'
+
+    const hasUnsavedChanges = useMemo(() => {
+        if (!selectedUser) return false
+        const baseline = Array.isArray(selectedUser.views_json)
+            ? selectedUser.views_json
+            : DEFAULT_ROLE_VIEWS[selectedUser.role] || []
+        const a = [...baseline].sort().join('|')
+        const b = [...allowedPaths].sort().join('|')
+        return a !== b
+    }, [selectedUser, allowedPaths])
+
+    const togglePath = (path: string) => {
+        if (isSuperAdminTarget) return
+        setSaveStatus(null)
+        setAllowedPaths(prev =>
+            prev.includes(path) ? prev.filter(p => p !== path) : [...prev, path]
         )
     }
 
-    const togglePath = (path: string) => {
-        if (allowedPaths.includes(path)) {
-            setAllowedPaths(allowedPaths.filter((p) => p !== path))
+    const togglePillar = (pillarModsPaths: string[]) => {
+        if (isSuperAdminTarget) return
+        setSaveStatus(null)
+        const allEnabled = pillarModsPaths.every(p => allowedPaths.includes(p))
+        if (allEnabled) {
+            setAllowedPaths(prev => prev.filter(p => !pillarModsPaths.includes(p)))
         } else {
-            setAllowedPaths([...allowedPaths, path])
+            setAllowedPaths(prev => Array.from(new Set([...prev, ...pillarModsPaths])))
         }
     }
 
     const handleRestoreRoleDefaults = () => {
-        if (!selectedUser) return
+        if (!selectedUser || isSuperAdminTarget) return
+        setSaveStatus(null)
         const defaults = DEFAULT_ROLE_VIEWS[selectedUser.role] || []
         setAllowedPaths(defaults)
-        toast.info(`Vistas recomendadas cargadas para ${selectedUser.role}. Presiona Guardar para aplicar.`)
     }
 
     const handleSelectAll = () => {
-        setAllowedPaths(ALL_SYSTEM_MODULES.map((m) => m.path))
+        if (isSuperAdminTarget) return
+        setSaveStatus(null)
+        setAllowedPaths(ALL_SYSTEM_MODULES.map(m => m.path))
+    }
+
+    const handleClearAll = () => {
+        if (isSuperAdminTarget) return
+        setSaveStatus(null)
+        setAllowedPaths([])
     }
 
     const handleSave = async () => {
-        if (!selectedUserId) return
-        setSaving(true)
+        if (!selectedUserId || !selectedUser) return
+        if (isSuperAdminTarget) {
+            setSaveStatus({ type: 'ok', text: 'SUPER_ADMIN mantiene acceso completo en Web y APK.' })
+            return
+        }
 
-        const { error } = await supabase
+        setSaving(true)
+        setSaveStatus(null)
+
+        const { data: updatedRow, error } = await supabase
             .from('sys_users')
             .update({ views_json: allowedPaths })
             .eq('id', selectedUserId)
+            .select('id, views_json')
+            .maybeSingle()
 
-        if (error) {
-            toast.error('Error al guardar visiones: ' + error.message)
+        if (error || !updatedRow) {
+            setSaveStatus({
+                type: 'err',
+                text: 'No se pudo guardar en Supabase: ' + (error?.message || 'Sin permisos o fila no actualizada.')
+            })
         } else {
-            toast.success('Vistas actualizadas y sincronizadas con Web y APK Android')
-            setUsers(
-                users.map((u) =>
-                    u.id === selectedUserId ? { ...u, views_json: allowedPaths } : u
-                )
+            const savedViews = Array.isArray(updatedRow.views_json) ? updatedRow.views_json : allowedPaths
+            setUsers(prev =>
+                prev.map(u => (u.id === selectedUserId ? { ...u, views_json: savedViews } : u))
             )
+            setAllowedPaths(savedViews)
+
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('raya-views-updated'))
+            }
+            if (currentAuthUser?.email && selectedUser.email.toLowerCase() === currentAuthUser.email.toLowerCase()) {
+                await refreshUserConfig()
+            }
+
+            setSaveStatus({
+                type: 'ok',
+                text: `Vistas guardadas para ${selectedUser.full_name} (${savedViews.length} módulos activos en Web y APK).`
+            })
         }
         setSaving(false)
     }
 
-    const selectedUser = users.find((u) => u.id === selectedUserId)
-    const pillars = Array.from(new Set(ALL_SYSTEM_MODULES.map((m) => m.pillar)))
+    const filteredUsers = users.filter(u =>
+        `${u.full_name} ${u.email} ${u.role}`.toLowerCase().includes(userSearch.toLowerCase())
+    )
+
+    const filteredModules = ALL_SYSTEM_MODULES.filter(m =>
+        `${m.label} ${m.description} ${m.pillar} ${m.apkModule} ${m.path}`
+            .toLowerCase()
+            .includes(moduleSearch.toLowerCase())
+    )
+
+    const pillars = Array.from(new Set(filteredModules.map(m => m.pillar)))
+
+    // Vista previa de pestañas que se reflejarán en la APK MobileRaya
+    const apkPreviewTabs = useMemo(() => {
+        const effective = isSuperAdminTarget
+            ? ALL_SYSTEM_MODULES.map(m => m.path)
+            : allowedPaths
+        const hasPrefix = (prefix: string) =>
+            effective.some(v => v === prefix || v.startsWith(prefix + '/'))
+        const tabs: string[] = []
+        if (effective.includes('/dashboard')) tabs.push('Inicio (KPIs)')
+        if (hasPrefix('/dashboard/operacion/reportes-diarios')) tabs.push('Reportes Diarios')
+        if (effective.includes('/dashboard/catalogos') || hasPrefix('/dashboard/catalogos/cuadrillas')) tabs.push('Cuadrillas')
+        if (hasPrefix('/dashboard/semana')) tabs.push('Planeación')
+        if (hasPrefix('/dashboard/chat')) tabs.push('Bitácora / Tareas')
+        if (hasPrefix('/dashboard/nomina')) tabs.push('Pre-Nómina')
+        if (effective.includes('/dashboard/catalogos') || hasPrefix('/dashboard/catalogos/empleados')) tabs.push('Personal RH')
+        if (effective.includes('/dashboard/catalogos') || hasPrefix('/dashboard/catalogos/ubicaciones') || hasPrefix('/dashboard/catalogos/productos-mina')) tabs.push('Catálogos')
+        return tabs
+    }, [allowedPaths, isSuperAdminTarget])
+
+    if (currentRole && currentRole !== 'SUPER_ADMIN') {
+        return (
+            <div className="max-w-xl mx-auto mt-12 p-8 bg-slate-900 border border-rose-500/30 rounded-2xl text-center space-y-3">
+                <Lock className="w-10 h-10 text-rose-400 mx-auto" />
+                <h2 className="text-lg font-black text-white">Acceso Exclusivo de Administración</h2>
+                <p className="text-sm text-slate-400">
+                    Solo el usuario SUPER_ADMIN puede modificar la matriz de vistas Web y APK.
+                </p>
+            </div>
+        )
+    }
 
     return (
-        <div className="max-w-7xl mx-auto pb-12 space-y-6">
-            {/* Cabecera */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+        <div className="space-y-6 max-w-7xl mx-auto w-full min-w-0">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-500 mb-1">
-                        <Smartphone size={15} /> Sincronización en Tiempo Real Web + APK Android
-                    </div>
                     <h1 className="text-2xl md:text-3xl font-black text-white flex items-center gap-3">
-                        <Shield className="text-amber-500" size={30} />
-                        Control de Vistas por Usuario (App Web y APK)
+                        <div className="p-2.5 bg-amber-500/15 border border-amber-500/30 rounded-xl text-amber-500">
+                            <Eye className="w-6 h-6" />
+                        </div>
+                        Control Centralizado de Vistas (Web + APK)
                     </h1>
                     <p className="text-slate-400 text-sm mt-1">
-                        Define exactamente qué pantallas puede ver cada usuario. En el APK Android solo se reflejarán las vistas que actives aquí, protegiendo precios unitarios, tonelaje y nómina.
+                        Lo que habilites aquí para cada usuario se sincroniza en tiempo real en la página Web y se refleja automáticamente en la APK móvil.
                     </p>
                 </div>
-
-                <Link
-                    href="/dashboard/configuracion/usuarios"
-                    className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-black uppercase tracking-wider border border-slate-700 shrink-0 self-start md:self-center"
-                >
-                    Administrar Usuarios y Claves →
-                </Link>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {saveStatus && (
+                <div
+                    className={`p-3.5 rounded-xl border text-xs font-bold flex items-center gap-2.5 ${
+                        saveStatus.type === 'ok'
+                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                            : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                    }`}
+                >
+                    {saveStatus.type === 'ok' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+                    <span>{saveStatus.text}</span>
+                </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 {/* Columna Izquierda: Lista de Usuarios */}
-                <div className="lg:col-span-4 space-y-4">
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-                        <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <Users size={18} className="text-amber-500" />
-                                <h2 className="font-black text-white text-sm uppercase tracking-wider">
-                                    Usuarios Registrados
-                                </h2>
-                            </div>
-                            <span className="text-xs font-bold text-slate-400">{users.length} activos</span>
-                        </div>
-                        <div className="max-h-[580px] overflow-y-auto custom-scrollbar divide-y divide-slate-800/60">
-                            {loading ? (
-                                <div className="p-10 text-center text-slate-500 animate-pulse font-bold">
-                                    Cargando usuarios...
-                                </div>
-                            ) : (
-                                users.map((u) => {
-                                    const isSelected = selectedUserId === u.id
-                                    const viewCount = Array.isArray(u.views_json)
-                                        ? u.views_json.length
-                                        : (DEFAULT_ROLE_VIEWS[u.role] || []).length
-                                    return (
-                                        <button
-                                            key={u.id}
-                                            onClick={() => handleSelectUser(u)}
-                                            className={`w-full text-left p-4 transition-all flex items-center justify-between group cursor-pointer ${
-                                                isSelected
-                                                    ? 'bg-amber-500/15 border-l-4 border-l-amber-500'
-                                                    : 'hover:bg-slate-800/50'
-                                            }`}
-                                        >
-                                            <div className="min-w-0 pr-2">
-                                                <div
-                                                    className={`font-black text-sm truncate ${
-                                                        isSelected ? 'text-amber-500' : 'text-white'
-                                                    }`}
-                                                >
-                                                    {u.full_name || u.nickname || u.email.split('@')[0]}
-                                                </div>
-                                                <div className="text-xs text-slate-400 truncate font-mono">
-                                                    {u.email}
-                                                </div>
-                                                <div className="flex flex-wrap gap-1.5 mt-2">
-                                                    <span className="text-[10px] px-2 py-0.5 bg-slate-800 rounded text-amber-400 uppercase font-black border border-slate-700">
-                                                        {u.role}
-                                                    </span>
-                                                    <span className="text-[10px] px-2 py-0.5 bg-emerald-500/15 text-emerald-400 rounded font-black border border-emerald-500/30">
-                                                        {u.role === 'SUPER_ADMIN'
-                                                            ? 'Acceso Total'
-                                                            : `${viewCount} Vistas Web/APK`}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            <ChevronRight
-                                                size={18}
-                                                className={`shrink-0 transition-transform ${
-                                                    isSelected
-                                                        ? 'translate-x-1 text-amber-500'
-                                                        : 'text-slate-600 group-hover:translate-x-1'
-                                                }`}
-                                            />
-                                        </button>
-                                    )
-                                })
-                            )}
+                <div className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-300">
+                            <Users className="w-4 h-4 text-amber-500" />
+                            Usuarios ({filteredUsers.length})
                         </div>
                     </div>
+
+                    <div className="relative">
+                        <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                        <input
+                            type="text"
+                            value={userSearch}
+                            onChange={e => setUserSearch(e.target.value)}
+                            placeholder="Buscar usuario o rol..."
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white outline-none focus:border-amber-500"
+                        />
+                    </div>
+
+                    {loading ? (
+                        <div className="py-10 text-center text-slate-500 text-xs animate-pulse">
+                            Cargando usuarios...
+                        </div>
+                    ) : (
+                        <div className="space-y-2 max-h-[580px] overflow-y-auto pr-1">
+                            {filteredUsers.map(u => {
+                                const isSelected = u.id === selectedUserId
+                                const isCustom = Array.isArray(u.views_json)
+                                const viewCount = isCustom
+                                    ? u.views_json!.length
+                                    : (DEFAULT_ROLE_VIEWS[u.role] || []).length
+
+                                return (
+                                    <button
+                                        key={u.id}
+                                        type="button"
+                                        onClick={() => handleSelectUser(u)}
+                                        className={`w-full text-left p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
+                                            isSelected
+                                                ? 'bg-amber-500/10 border-amber-500 shadow-lg shadow-amber-900/10'
+                                                : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+                                        }`}
+                                    >
+                                        <div className="min-w-0">
+                                            <div className="font-bold text-white text-sm truncate flex items-center gap-2">
+                                                <span className="truncate">{u.full_name}</span>
+                                                {!u.active && (
+                                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400">
+                                                        Inactivo
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="text-[11px] text-slate-400 truncate">{u.email}</div>
+                                            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-slate-800 text-amber-400 border border-slate-700">
+                                                    {u.role.replace(/_/g, ' ')}
+                                                </span>
+                                                <span
+                                                    className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                                                        isCustom
+                                                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                                            : 'bg-slate-900 text-slate-400 border-slate-700'
+                                                    }`}
+                                                >
+                                                    {isCustom ? 'Personalizado' : 'Por defecto'} • {u.role === 'SUPER_ADMIN' ? 'Todas' : `${viewCount}`}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </button>
+                                )
+                            })}
+                        </div>
+                    )}
                 </div>
 
-                {/* Columna Derecha: Matriz de Vistas Web + APK */}
-                <div className="lg:col-span-8">
+                {/* Columna Derecha: Matriz de Módulos + Vista Previa */}
+                <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl p-5 md:p-6 space-y-5">
                     {selectedUser ? (
-                        <div className="bg-slate-900 border border-slate-800 rounded-2xl flex flex-col shadow-2xl overflow-hidden">
-                            {/* Cabecera del Usuario Seleccionado */}
-                            <div className="p-5 border-b border-slate-800 bg-slate-950 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <>
+                            {/* Barra Usuario Seleccionado + Botón Guardar */}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
                                 <div>
-                                    <div className="flex items-center gap-2">
-                                        <h3 className="text-lg font-black text-white">
-                                            {selectedUser.full_name || selectedUser.email}
-                                        </h3>
-                                        <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[10px] font-black uppercase">
-                                            {selectedUser.role}
+                                    <span className="text-[11px] uppercase tracking-wider font-black text-amber-500">
+                                        Configurando Acceso Web + APK de:
+                                    </span>
+                                    <h2 className="text-xl font-black text-white flex flex-wrap items-center gap-2 mt-0.5">
+                                        {selectedUser.full_name}
+                                        <span className="text-xs px-2.5 py-0.5 bg-slate-800 border border-slate-700 text-slate-300 rounded-full font-bold">
+                                            {selectedUser.role.replace(/_/g, ' ')}
                                         </span>
-                                    </div>
-                                    <p className="text-xs text-slate-400 font-mono mt-0.5">
-                                        {selectedUser.email} • Las vistas marcadas se reflejan inmediatamente en su APK Android.
-                                    </p>
+                                    </h2>
                                 </div>
 
                                 <div className="flex flex-wrap items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={handleRestoreRoleDefaults}
-                                        className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1.5 border border-slate-700 cursor-pointer"
-                                        title="Cargar las vistas recomendadas para su nivel de autoridad"
-                                    >
-                                        <RotateCcw size={14} /> Por Defecto del Rol
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={handleSelectAll}
-                                        className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1.5 border border-slate-700 cursor-pointer"
-                                    >
-                                        <CheckSquare size={14} /> Todas
-                                    </button>
+                                    {hasUnsavedChanges && (
+                                        <span className="text-[11px] font-bold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/30">
+                                            Cambios sin guardar
+                                        </span>
+                                    )}
                                     <button
                                         type="button"
                                         onClick={handleSave}
-                                        disabled={saving}
-                                        className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black uppercase flex items-center gap-1.5 shadow-lg cursor-pointer disabled:opacity-60"
+                                        disabled={saving || isSuperAdminTarget}
+                                        className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-sm font-black shadow-lg shadow-emerald-900/30 transition-all cursor-pointer"
                                     >
-                                        <Save size={15} />
-                                        {saving ? 'Sincronizando...' : 'Guardar y Reflejar en APK'}
+                                        <Save className="w-4 h-4" />
+                                        {saving ? 'Guardando...' : 'Guardar Vistas'}
                                     </button>
                                 </div>
                             </div>
 
-                            {/* Lista de Módulos por Pilar */}
-                            <div className="p-5 space-y-6">
-                                {pillars.map((pillar) => {
-                                    const mods = ALL_SYSTEM_MODULES.filter((m) => m.pillar === pillar)
+                            {isSuperAdminTarget && (
+                                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 font-semibold flex items-center gap-2">
+                                    <Shield size={16} className="shrink-0" />
+                                    <span>
+                                        SUPER_ADMIN siempre tiene acceso completo a todas las vistas en Web y APK por seguridad administrativa.
+                                    </span>
+                                </div>
+                            )}
+
+                            {/* Vista Previa en Vivo (Web + APK) */}
+                            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-white">
+                                        <Smartphone className="w-4 h-4 text-emerald-400" />
+                                        Vista Previa en APK Móvil ({apkPreviewTabs.length} pantallas visibles):
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                                        <Monitor className="w-3.5 h-3.5 text-sky-400" />
+                                        <span>
+                                            Web: {isSuperAdminTarget ? ALL_SYSTEM_MODULES.length : allowedPaths.length} módulos activos
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {apkPreviewTabs.length === 0 ? (
+                                        <span className="text-xs text-rose-400 italic">
+                                            Ninguna pantalla móvil habilitada para este usuario.
+                                        </span>
+                                    ) : (
+                                        apkPreviewTabs.map(tab => (
+                                            <span
+                                                key={tab}
+                                                className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                                            >
+                                                📱 {tab}
+                                            </span>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Plantillas Rápidas + Buscador de Módulos */}
+                            {!isSuperAdminTarget && (
+                                <div className="space-y-3">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <span className="text-[11px] font-black uppercase text-slate-400 flex items-center gap-1">
+                                            <Sparkles size={13} className="text-amber-400" /> Plantillas rápidas:
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={handleRestoreRoleDefaults}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-bold cursor-pointer"
+                                        >
+                                            <RotateCcw className="w-3.5 h-3.5 text-amber-400" /> Por defecto de su rol
+                                        </button>
+                                        {ROLE_PRESETS.map(p => (
+                                            <button
+                                                key={p.id}
+                                                type="button"
+                                                onClick={() => {
+                                                    setSaveStatus(null)
+                                                    setAllowedPaths(p.paths)
+                                                }}
+                                                className="px-3 py-1.5 bg-slate-800 hover:bg-amber-500/20 hover:text-amber-300 hover:border-amber-500/40 text-slate-300 border border-slate-700 rounded-lg text-xs font-bold cursor-pointer transition-colors"
+                                            >
+                                                {p.label}
+                                            </button>
+                                        ))}
+                                        <button
+                                            type="button"
+                                            onClick={handleSelectAll}
+                                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-xs font-bold cursor-pointer"
+                                        >
+                                            Marcar Todas
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleClearAll}
+                                            className="px-3 py-1.5 bg-slate-800 hover:bg-rose-500/20 text-rose-400 border border-slate-700 rounded-lg text-xs font-bold cursor-pointer"
+                                        >
+                                            Limpiar
+                                        </button>
+                                    </div>
+
+                                    <div className="relative">
+                                        <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                                        <input
+                                            type="text"
+                                            value={moduleSearch}
+                                            onChange={e => setModuleSearch(e.target.value)}
+                                            placeholder="Filtrar módulo por nombre, ruta Web o pantalla APK..."
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white outline-none focus:border-amber-500"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Matriz por Pilares */}
+                            <div className="space-y-5">
+                                {pillars.map(pillar => {
+                                    const mods = filteredModules.filter(m => m.pillar === pillar)
+                                    const modPaths = mods.map(m => m.path)
+                                    const allChecked = modPaths.every(p => isSuperAdminTarget || allowedPaths.includes(p))
+
                                     return (
                                         <div key={pillar} className="space-y-2.5">
-                                            <h4 className="text-xs font-black uppercase tracking-wider text-amber-500 border-b border-slate-800 pb-1.5">
-                                                {pillar}
-                                            </h4>
+                                            <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                                                <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                                                    <Shield className="w-3.5 h-3.5 text-amber-500" />
+                                                    {pillar}
+                                                </h3>
+                                                {!isSuperAdminTarget && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => togglePillar(modPaths)}
+                                                        className="text-[11px] font-bold text-amber-400 hover:text-amber-300 cursor-pointer"
+                                                    >
+                                                        {allChecked ? 'Quitar todo el pilar' : 'Activar todo el pilar'}
+                                                    </button>
+                                                )}
+                                            </div>
+
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                {mods.map((mod) => {
-                                                    const isChecked =
-                                                        selectedUser.role === 'SUPER_ADMIN' ||
-                                                        allowedPaths.includes(mod.path)
-                                                    const IconComp = mod.icon
+                                                {mods.map(mod => {
+                                                    const isEnabled = isSuperAdminTarget || allowedPaths.includes(mod.path)
                                                     return (
-                                                        <div
+                                                        <motion.div
                                                             key={mod.path}
-                                                            onClick={() => {
-                                                                if (selectedUser.role === 'SUPER_ADMIN') {
-                                                                    toast.info(
-                                                                        'El rol SUPER_ADMIN siempre conserva acceso total por seguridad.'
-                                                                    )
-                                                                    return
-                                                                }
-                                                                togglePath(mod.path)
-                                                            }}
-                                                            className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-start justify-between gap-3 ${
-                                                                isChecked
-                                                                    ? 'bg-emerald-500/10 border-emerald-500/50 shadow-sm'
-                                                                    : 'bg-slate-950/60 border-slate-800 opacity-75 hover:opacity-100'
+                                                            whileTap={isSuperAdminTarget ? undefined : { scale: 0.99 }}
+                                                            onClick={() => togglePath(mod.path)}
+                                                            className={`p-3.5 rounded-xl border-2 transition-all flex items-start gap-3 ${
+                                                                isSuperAdminTarget ? 'cursor-default opacity-80' : 'cursor-pointer'
+                                                            } ${
+                                                                isEnabled
+                                                                    ? 'bg-amber-500/10 border-amber-500/50'
+                                                                    : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
                                                             }`}
                                                         >
-                                                            <div className="flex items-start gap-3 min-w-0">
-                                                                <div
-                                                                    className={`p-2 rounded-xl shrink-0 mt-0.5 ${
-                                                                        isChecked
-                                                                            ? 'bg-emerald-500 text-slate-950'
-                                                                            : 'bg-slate-800 text-slate-400'
-                                                                    }`}
-                                                                >
-                                                                    <IconComp size={16} />
+                                                            <div className="mt-0.5 shrink-0">
+                                                                {isEnabled ? (
+                                                                    <CheckSquare className="w-5 h-5 text-amber-500" />
+                                                                ) : (
+                                                                    <Square className="w-5 h-5 text-slate-600" />
+                                                                )}
+                                                            </div>
+                                                            <div className="min-w-0 flex-1">
+                                                                <div className="text-sm font-bold text-white leading-snug">
+                                                                    {mod.label}
                                                                 </div>
-                                                                <div className="min-w-0">
-                                                                    <div className="text-xs font-black text-white flex items-center gap-1.5 flex-wrap">
-                                                                        <span>{mod.name}</span>
-                                                                        {mod.confidential && (
-                                                                            <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[9px] font-black uppercase flex items-center gap-0.5">
-                                                                                <Lock size={9} /> Sensible
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                    <div className="text-[11px] font-bold text-amber-400 mt-0.5 flex items-center gap-1">
-                                                                        <Smartphone size={11} /> {mod.apkScreen}
-                                                                    </div>
-                                                                    <div className="text-[10px] text-slate-500 font-mono truncate">
+                                                                <div className="text-xs text-slate-400 mt-0.5 leading-snug">
+                                                                    {mod.description}
+                                                                </div>
+                                                                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                                                                    <span className="text-[10px] font-mono text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 truncate max-w-full">
                                                                         {mod.path}
-                                                                    </div>
+                                                                    </span>
+                                                                    <span
+                                                                        className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                                                                            mod.apkModule.startsWith('Solo Web')
+                                                                                ? 'bg-sky-500/10 text-sky-400 border-sky-500/20'
+                                                                                : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                                                        }`}
+                                                                    >
+                                                                        APK: {mod.apkModule}
+                                                                    </span>
                                                                 </div>
                                                             </div>
-
-                                                            <div
-                                                                className={`w-11 h-6 rounded-full relative transition-colors shrink-0 mt-1 ${
-                                                                    isChecked ? 'bg-emerald-500' : 'bg-slate-700'
-                                                                }`}
-                                                            >
-                                                                <div
-                                                                    className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${
-                                                                        isChecked ? 'left-6' : 'left-1'
-                                                                    }`}
-                                                                />
-                                                            </div>
-                                                        </div>
+                                                        </motion.div>
                                                     )
                                                 })}
                                             </div>
@@ -448,10 +581,10 @@ export default function VisionesPage() {
                                     )
                                 })}
                             </div>
-                        </div>
+                        </>
                     ) : (
-                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400">
-                            Selecciona un usuario a la izquierda para configurar sus vistas en Web y APK Android.
+                        <div className="py-20 text-center text-slate-500 text-sm">
+                            Selecciona un usuario para configurar sus vistas Web y APK.
                         </div>
                     )}
                 </div>

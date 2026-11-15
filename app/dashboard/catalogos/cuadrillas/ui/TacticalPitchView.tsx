@@ -6,10 +6,16 @@ import {
     Users, AlertTriangle, Search, CheckCircle2,
     X, ArrowRightLeft, Lock, Unlock,
     Pickaxe, HardHat, Drill, Truck, Wrench, MessageSquarePlus, ShieldCheck, Printer,
-    Calendar, Sparkles, ChevronDown
+    Calendar, Sparkles, ChevronDown, UserCheck, BellRing
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
+import {
+    pushNotification,
+    getSquadSupervisorsMeta,
+    saveSquadSupervisorMeta,
+    SquadSupervisorMeta
+} from '@/lib/notifications-service'
 
 interface Employee {
     id: string
@@ -33,6 +39,17 @@ interface Cuadrilla {
     id: string
     nombre: string
     codigo?: string
+    supervisor_id?: string | null
+    supervisor_name?: string
+    supervisor_user_id?: string | null
+    supervisor_user_email?: string | null
+}
+
+interface WebSysUser {
+    id: string
+    email: string
+    full_name: string
+    role: string
 }
 
 interface CrewHistoryNote {
@@ -62,15 +79,27 @@ const WEEKS_LIST = [
 ]
 
 export default function TacticalPitchView() {
-    const { sysRole } = useAuth()
-    const canEdit = sysRole === 'SUPER_ADMIN' || sysRole === 'GERENTE' || sysRole === 'SUPERINTENDENTE'
+    const { sysRole, user, fullName } = useAuth()
+    const canEdit = sysRole === 'SUPER_ADMIN' || sysRole === 'GERENTE' || sysRole === 'SUPERINTENDENTE' || sysRole === 'DIRECTOR_OPERATIVO' || sysRole === 'JEFE_MINA'
 
     const [selectedWeek, setSelectedWeek] = useState<string>('SEMANA_38')
     const [cuadrillas, setCuadrillas] = useState<Cuadrilla[]>([])
     const [selectedCuadrillaId, setSelectedCuadrillaId] = useState<string>('')
     const [miembros, setMiembros] = useState<MiembroCuadrilla[]>([])
     const [bancoPersonal, setBancoPersonal] = useState<Employee[]>([])
-    const [globalAssignments, setGlobalAssignments] = useState<Record<string, { cuadrilla_id: string, cuadrilla_nombre: string }>>({})
+    const [webUsers, setWebUsers] = useState<WebSysUser[]>([])
+    const [supervisorMetaMap, setSupervisorMetaMap] = useState<Record<string, SquadSupervisorMeta>>({})
+    const [supEditEmpId, setSupEditEmpId] = useState<string>('')
+    const [supEditWebEmail, setSupEditWebEmail] = useState<string>('')
+    const [savingSupervisor, setSavingSupervisor] = useState(false)
+    const [globalAssignments, setGlobalAssignments] = useState<Record<string, {
+        cuadrilla_id: string
+        cuadrilla_nombre: string
+        supervisor_name?: string
+        supervisor_employee_id?: string | null
+        supervisor_user_email?: string | null
+        supervisor_user_id?: string | null
+    }>>({})
     const [historyNotes, setHistoryNotes] = useState<Record<string, CrewHistoryNote>>({})
 
     const [searchTerm, setSearchTerm] = useState('')
@@ -104,43 +133,69 @@ export default function TacticalPitchView() {
     useEffect(() => {
         if (selectedCuadrillaId) {
             loadMiembrosCuadrilla(selectedCuadrillaId)
+            const cur = cuadrillas.find(c => c.id === selectedCuadrillaId)
+            const curMeta = supervisorMetaMap[selectedCuadrillaId]
+            setSupEditEmpId(cur?.supervisor_id || curMeta?.supervisor_employee_id || '')
+            setSupEditWebEmail(cur?.supervisor_user_email || curMeta?.supervisor_user_email || '')
         }
-    }, [selectedCuadrillaId, selectedWeek])
+    }, [selectedCuadrillaId, selectedWeek, cuadrillas, supervisorMetaMap])
+
+    const buildCuadrillasWithSupervisors = (
+        cData: any[],
+        metaMap: Record<string, SquadSupervisorMeta>
+    ): Cuadrilla[] => {
+        return (cData || []).map((c: any) => {
+            const meta = metaMap[c.id]
+            const supEmp = Array.isArray(c.rh_employees) ? c.rh_employees[0] : c.rh_employees
+            const empName = supEmp ? `${supEmp.first_name} ${supEmp.last_name}`.trim() : ''
+            return {
+                id: c.id,
+                nombre: c.nombre,
+                codigo: c.codigo,
+                supervisor_id: c.supervisor_id || meta?.supervisor_employee_id || null,
+                supervisor_name: empName || meta?.supervisor_employee_name || meta?.supervisor_user_name || '',
+                supervisor_user_id: meta?.supervisor_user_id || null,
+                supervisor_user_email: meta?.supervisor_user_email || null
+            }
+        })
+    }
 
     const loadInitialData = async () => {
         setLoading(true)
 
-        // 1. Cargar las 5 Cuadrillas Oficiales Activas de Mina
-        const { data: cData } = await supabase
-            .from('cat_cuadrillas')
-            .select('id, nombre, codigo')
-            .eq('activo', true)
-            .order('nombre')
+        const [{ data: cData }, metaMap, { data: uData }, { data: eData }] = await Promise.all([
+            supabase
+                .from('cat_cuadrillas')
+                .select('id, nombre, codigo, supervisor_id, rh_employees(id, first_name, last_name, employee_code)')
+                .eq('activo', true)
+                .order('nombre'),
+            getSquadSupervisorsMeta(),
+            supabase
+                .from('sys_users')
+                .select('id, email, full_name, role')
+                .order('full_name'),
+            supabase
+                .from('rh_employees')
+                .select(`
+                    id, employee_code, first_name, last_name, sueldo_diario_base,
+                    puesto:cat_puestos(nombre)
+                `)
+                .in('status', ['ACTIVO', 'ACTIVE'])
+                .order('employee_code')
+        ])
 
-        const cuadMap: Record<string, string> = {}
-        if (cData && cData.length > 0) {
-            setCuadrillas(cData)
-            cData.forEach(c => { cuadMap[c.id] = c.nombre })
-            setSelectedCuadrillaId(cData[0].id)
+        setSupervisorMetaMap(metaMap)
+        if (uData) setWebUsers(uData as WebSysUser[])
+        if (eData) setBancoPersonal(eData as any)
+
+        const enriched = buildCuadrillasWithSupervisors(cData || [], metaMap)
+        if (enriched.length > 0) {
+            setCuadrillas(enriched)
+            setSelectedCuadrillaId(prev => prev || enriched[0].id)
         }
 
-        // 2. Cargar Todo el Personal con su Puesto Oficial
-        const { data: eData } = await supabase
-            .from('rh_employees')
-            .select(`
-                id, employee_code, first_name, last_name, sueldo_diario_base,
-                puesto:cat_puestos(nombre)
-            `)
-            .eq('status', 'ACTIVO')
-            .order('employee_code')
+        await refreshGlobalAssignments(enriched)
 
-        if (eData) {
-            setBancoPersonal(eData as any)
-        }
-
-        await refreshGlobalAssignments(cuadMap)
-
-        // 3. Cargar notas de historial desde sys_config
         const { data: histData } = await supabase
             .from('sys_config')
             .select('value_json')
@@ -154,22 +209,86 @@ export default function TacticalPitchView() {
         setLoading(false)
     }
 
-    const refreshGlobalAssignments = async (cuadNameMap?: Record<string, string>) => {
-        const mapToUse = cuadNameMap || cuadrillas.reduce((acc, c) => ({ ...acc, [c.id]: c.nombre }), {} as Record<string, string>)
+    const refreshGlobalAssignments = async (cuadsOverride?: Cuadrilla[]) => {
+        const list = cuadsOverride || cuadrillas
+        const cuadInfoMap = list.reduce((acc, c) => {
+            acc[c.id] = c
+            return acc
+        }, {} as Record<string, Cuadrilla>)
+
         const { data: allM } = await supabase
             .from('cat_cuadrillas_miembros')
             .select('id, empleado_id, cuadrilla_id')
 
-        const gMap: Record<string, { cuadrilla_id: string, cuadrilla_nombre: string }> = {}
+        const gMap: Record<string, {
+            cuadrilla_id: string
+            cuadrilla_nombre: string
+            supervisor_name?: string
+            supervisor_employee_id?: string | null
+            supervisor_user_email?: string | null
+            supervisor_user_id?: string | null
+        }> = {}
         if (allM) {
             allM.forEach((m: any) => {
+                const cInfo = cuadInfoMap[m.cuadrilla_id]
                 gMap[m.empleado_id] = {
                     cuadrilla_id: m.cuadrilla_id,
-                    cuadrilla_nombre: mapToUse[m.cuadrilla_id] || 'Otra Cuadrilla'
+                    cuadrilla_nombre: cInfo?.nombre || 'Otra Cuadrilla',
+                    supervisor_name: cInfo?.supervisor_name || 'Sin Supervisor Asignado',
+                    supervisor_employee_id: cInfo?.supervisor_id || null,
+                    supervisor_user_email: cInfo?.supervisor_user_email || null,
+                    supervisor_user_id: cInfo?.supervisor_user_id || null
                 }
             })
         }
         setGlobalAssignments(gMap)
+    }
+
+    const handleSaveSquadSupervisor = async () => {
+        if (!selectedCuadrillaId || !supEditEmpId) {
+            alert('Selecciona el Supervisor en Nómina para asignarlo a esta cuadrilla.')
+            return
+        }
+        setSavingSupervisor(true)
+        const empSup = bancoPersonal.find(e => e.id === supEditEmpId)
+        const webSup = webUsers.find(u => u.email === supEditWebEmail)
+        const empName = empSup ? `${empSup.first_name} ${empSup.last_name}`.trim() : ''
+
+        const { error } = await supabase
+            .from('cat_cuadrillas')
+            .update({ supervisor_id: supEditEmpId })
+            .eq('id', selectedCuadrillaId)
+
+        if (error) {
+            setSavingSupervisor(false)
+            alert('Error al guardar supervisor: ' + error.message)
+            return
+        }
+
+        const nextMetaMap = await saveSquadSupervisorMeta(selectedCuadrillaId, {
+            supervisor_employee_id: supEditEmpId,
+            supervisor_employee_name: empName,
+            supervisor_user_id: webSup?.id || null,
+            supervisor_user_email: webSup?.email || null,
+            supervisor_user_name: webSup?.full_name || null
+        })
+        setSupervisorMetaMap(nextMetaMap)
+
+        const nextCuadrillas = cuadrillas.map(c =>
+            c.id === selectedCuadrillaId
+                ? {
+                    ...c,
+                    supervisor_id: supEditEmpId,
+                    supervisor_name: empName || webSup?.full_name || '',
+                    supervisor_user_id: webSup?.id || null,
+                    supervisor_user_email: webSup?.email || null
+                }
+                : c
+        )
+        setCuadrillas(nextCuadrillas)
+        await refreshGlobalAssignments(nextCuadrillas)
+        setSavingSupervisor(false)
+        triggerActionNotice(`✅ Supervisor asignado: ${empName || webSup?.full_name} a ${activeCuadrilla?.nombre}`)
     }
 
     const inferZoneFromPosition = (puestoNombre?: string): 'AVANCE' | 'REZAGA' | 'ACARREO' | 'SERVICIOS' => {
@@ -282,11 +401,15 @@ export default function TacticalPitchView() {
         const { emp, targetZone, previousCrewName, workedOnComment, isExistingMemberEdit } = transferModal
         if (!emp || !selectedCuadrillaId) return
 
+        const prevCrewSnapshot = globalAssignments[emp.id]
+        const destSquad = cuadrillas.find(c => c.id === selectedCuadrillaId)
+        const actorName = fullName || user?.email || sysRole || 'Mando Operativo'
+
         const newNote: CrewHistoryNote = {
             previous_crew: previousCrewName.trim() || 'Cuadrilla Anterior',
             worked_on: workedOnComment.trim() || 'Operación general en turno previo',
             updated_at: new Date().toISOString(),
-            updated_by: sysRole || 'SUPERINTENDENTE',
+            updated_by: actorName,
             zone: targetZone
         }
 
@@ -321,7 +444,34 @@ export default function TacticalPitchView() {
             await refreshGlobalAssignments()
             setMiembros(prev => [...prev.filter(m => m.empleado_id !== emp.id), { ...data as any, zona: targetZone }])
             setTransferModal(prev => ({ ...prev, open: false }))
-            triggerActionNotice(`✅ ${emp.first_name} ${emp.last_name} asignado a ${targetZone}`)
+
+            // Regla Obligatoria: Si pertenecía a otra cuadrilla, notificar al supervisor anterior
+            if (prevCrewSnapshot && prevCrewSnapshot.cuadrilla_id !== selectedCuadrillaId) {
+                const empFullName = `${emp.first_name} ${emp.last_name}`.trim()
+                await pushNotification({
+                    type: 'CREW_REMOVED',
+                    title: `Te retiraron a ${empFullName} de ${prevCrewSnapshot.cuadrilla_nombre}`,
+                    message: `${empFullName} (${emp.employee_code}) fue retirado de tu cuadrilla (${prevCrewSnapshot.cuadrilla_nombre}) y transferido a ${destSquad?.nombre || 'otra cuadrilla'} (${targetZone}).`,
+                    details: [
+                        `Trabajador retirado: ${emp.employee_code} — ${empFullName} (${emp.puesto?.nombre || 'Operativo'})`,
+                        `Cuadrilla origen: ${prevCrewSnapshot.cuadrilla_nombre} (Sup: ${prevCrewSnapshot.supervisor_name || 'Sin asignar'})`,
+                        `Nueva cuadrilla destino: ${destSquad?.nombre || 'N/A'} — Zona ${targetZone}${destSquad?.supervisor_name ? ` (Sup: ${destSquad.supervisor_name})` : ''}`,
+                        `Motivo / actividad anterior: ${newNote.worked_on}`
+                    ],
+                    target_employee_id: prevCrewSnapshot.supervisor_employee_id || null,
+                    target_employee_name: prevCrewSnapshot.supervisor_name || null,
+                    target_user_ids: prevCrewSnapshot.supervisor_user_id ? [prevCrewSnapshot.supervisor_user_id] : undefined,
+                    target_user_emails: prevCrewSnapshot.supervisor_user_email ? [prevCrewSnapshot.supervisor_user_email] : undefined,
+                    created_by_name: actorName,
+                    created_by_email: user?.email || null,
+                    link: '/dashboard/catalogos/cuadrillas'
+                })
+                triggerActionNotice(
+                    `✅ ${empFullName} transferido a ${targetZone}. 🔔 Se notificó a ${prevCrewSnapshot.supervisor_name || prevCrewSnapshot.cuadrilla_nombre}.`
+                )
+            } else {
+                triggerActionNotice(`✅ ${emp.first_name} ${emp.last_name} asignado a ${targetZone}`)
+            }
         } else {
             alert('Error al asignar: ' + (error?.message || 'Error desconocido'))
         }
@@ -332,7 +482,9 @@ export default function TacticalPitchView() {
         const miembro = miembros.find(m => m.empleado_id === empleadoId)
         if (!miembro) return
 
-        const activeCuadrillaName = cuadrillas.find(c => c.id === selectedCuadrillaId)?.nombre || 'Cuadrilla Anterior'
+        const activeCrewObj = cuadrillas.find(c => c.id === selectedCuadrillaId)
+        const activeCuadrillaName = activeCrewObj?.nombre || 'Cuadrilla Anterior'
+        const actorName = fullName || user?.email || sysRole || 'Mando Operativo'
 
         const { error } = await supabase
             .from('cat_cuadrillas_miembros')
@@ -346,11 +498,33 @@ export default function TacticalPitchView() {
                 previous_crew: activeCuadrillaName,
                 worked_on: prevNote?.worked_on || `Trabajó en ${miembro.zona} de ${activeCuadrillaName}`,
                 updated_at: new Date().toISOString(),
-                updated_by: sysRole || 'SUPERINTENDENTE'
+                updated_by: actorName
             })
             setMiembros(prev => prev.filter(m => m.empleado_id !== empleadoId))
             await refreshGlobalAssignments()
-            triggerActionNotice('Trabajador retirado de la cuadrilla (Queda disponible en banco de personal)')
+
+            const empFullName = `${miembro.rh_employees.first_name} ${miembro.rh_employees.last_name}`.trim()
+            await pushNotification({
+                type: 'CREW_REMOVED',
+                title: `Baja de ${empFullName} en ${activeCuadrillaName}`,
+                message: `Se retiró a ${empFullName} (${miembro.rh_employees.employee_code}) de ${activeCuadrillaName} (zona ${miembro.zona || 'General'}) hacia el Banco Disponible en Mina.`,
+                details: [
+                    `Trabajador retirado: ${miembro.rh_employees.employee_code} — ${empFullName}`,
+                    `Cuadrilla afectada: ${activeCuadrillaName}`,
+                    `Supervisor a cargo: ${activeCrewObj?.supervisor_name || 'Sin supervisor asignado'}`
+                ],
+                target_employee_id: activeCrewObj?.supervisor_id || null,
+                target_employee_name: activeCrewObj?.supervisor_name || null,
+                target_user_ids: activeCrewObj?.supervisor_user_id ? [activeCrewObj.supervisor_user_id] : undefined,
+                target_user_emails: activeCrewObj?.supervisor_user_email ? [activeCrewObj.supervisor_user_email] : undefined,
+                created_by_name: actorName,
+                created_by_email: user?.email || null,
+                link: '/dashboard/catalogos/cuadrillas'
+            })
+
+            triggerActionNotice(
+                `Trabajador retirado de ${activeCuadrillaName} y notificación enviada a ${activeCrewObj?.supervisor_name || 'Supervisión'}.`
+            )
         }
     }
 
@@ -535,6 +709,87 @@ export default function TacticalPitchView() {
                 </div>
             </div>
 
+            {/* BARRA DE SUPERVISOR TITULAR DE LA CUADRILLA ACTIVA (Regla obligatoria) */}
+            <div className={`p-3.5 rounded-2xl border-2 flex flex-col lg:flex-row lg:items-center justify-between gap-3 ${
+                activeCuadrilla?.supervisor_id
+                    ? 'bg-slate-900 border-emerald-500/30'
+                    : 'bg-amber-500/10 border-amber-500/40'
+            }`}>
+                <div className="flex items-center gap-3 min-w-0">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                        activeCuadrilla?.supervisor_id
+                            ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                            : 'bg-amber-500/20 border-amber-500/40 text-amber-400'
+                    }`}>
+                        <UserCheck size={20} />
+                    </div>
+                    <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                                Supervisor Titular de {activeCuadrilla?.nombre || 'Cuadrilla'}:
+                            </span>
+                            {activeCuadrilla?.supervisor_name ? (
+                                <span className="text-xs font-black text-emerald-400 bg-emerald-500/15 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                                    👷 {activeCuadrilla.supervisor_name}
+                                </span>
+                            ) : (
+                                <span className="text-xs font-black text-amber-400 bg-amber-500/15 px-2.5 py-0.5 rounded-full border border-amber-500/30">
+                                    ⚠️ Sin Supervisor Asignado
+                                </span>
+                            )}
+                            {activeCuadrilla?.supervisor_user_email && (
+                                <span className="text-[11px] text-slate-300 flex items-center gap-1">
+                                    <BellRing size={12} className="text-amber-400" />
+                                    Alertas: {activeCuadrilla.supervisor_user_email}
+                                </span>
+                            )}
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                            Cada cuadrilla debe tener su propio supervisor. Si le retiran personal para otra cuadrilla, el sistema le enviará alerta automática.
+                        </p>
+                    </div>
+                </div>
+
+                {canEdit && (
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <select
+                            value={supEditEmpId}
+                            onChange={e => setSupEditEmpId(e.target.value)}
+                            className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white font-semibold outline-none focus:border-amber-500 max-w-[230px]"
+                            title="Supervisor titular en nómina"
+                        >
+                            <option value="">-- Supervisor en Nómina --</option>
+                            {bancoPersonal.map(emp => (
+                                <option key={emp.id} value={emp.id}>
+                                    {emp.employee_code} - {emp.first_name} {emp.last_name}
+                                </option>
+                            ))}
+                        </select>
+                        <select
+                            value={supEditWebEmail}
+                            onChange={e => setSupEditWebEmail(e.target.value)}
+                            className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white font-semibold outline-none focus:border-amber-500 max-w-[230px]"
+                            title="Usuario web/app que recibirá notificaciones"
+                        >
+                            <option value="">-- Cuenta Alertas Web/APK --</option>
+                            {webUsers.map(u => (
+                                <option key={u.id} value={u.email}>
+                                    {u.full_name} ({u.role})
+                                </option>
+                            ))}
+                        </select>
+                        <button
+                            type="button"
+                            onClick={handleSaveSquadSupervisor}
+                            disabled={savingSupervisor || !supEditEmpId}
+                            className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs rounded-xl transition-all cursor-pointer"
+                        >
+                            {savingSupervisor ? 'Guardando...' : 'Asignar Supervisor'}
+                        </button>
+                    </div>
+                )}
+            </div>
+
             {/* Notification Toast */}
             <AnimatePresence>
                 {actionMessage && (
@@ -701,12 +956,17 @@ export default function TacticalPitchView() {
                                         ) : null}
 
                                         {currentCrew ? (
-                                            <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30 font-black flex items-center gap-1">
-                                                <ArrowRightLeft size={10} /> En: {currentCrew.cuadrilla_nombre}
-                                            </span>
+                                            <>
+                                                <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 font-black flex items-center gap-1">
+                                                    <ArrowRightLeft size={10} /> En: {currentCrew.cuadrilla_nombre}
+                                                </span>
+                                                <span className="px-2 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-500/30 font-bold flex items-center gap-1">
+                                                    <UserCheck size={10} /> Sup: {currentCrew.supervisor_name || 'Sin Supervisor'}
+                                                </span>
+                                            </>
                                         ) : (
                                             <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 font-black">
-                                                🟢 Libre
+                                                🟢 Libre en Banco
                                             </span>
                                         )}
                                     </div>
@@ -959,10 +1219,15 @@ export default function TacticalPitchView() {
 
                             <form onSubmit={confirmTransferAndSave} className="p-6 space-y-4">
                                 {!transferModal.isExistingMemberEdit && globalAssignments[transferModal.emp.id] && (
-                                    <div className="p-3.5 rounded-xl bg-amber-500/15 border-2 border-amber-500/40 text-xs text-amber-400 font-bold flex items-start gap-2.5">
-                                        <AlertTriangle size={18} className="shrink-0 mt-0.5" />
-                                        <div>
-                                            <strong>Regla Anti-Duplicados:</strong> El trabajador se encuentra actualmente en <u>{globalAssignments[transferModal.emp.id].cuadrilla_nombre}</u>. Al confirmar, será retirado de esa cuadrilla e integrado a <u>{activeCuadrilla?.nombre}</u>.
+                                    <div className="p-3.5 rounded-xl bg-amber-500/15 border-2 border-amber-500/40 text-xs text-amber-300 font-bold flex items-start gap-2.5">
+                                        <AlertTriangle size={18} className="shrink-0 mt-0.5 text-amber-400" />
+                                        <div className="space-y-1">
+                                            <div>
+                                                <strong>Regla Anti-Duplicados y Traspaso:</strong> Este trabajador pertenece actualmente a <u>{globalAssignments[transferModal.emp.id].cuadrilla_nombre}</u> (Supervisor: <strong>{globalAssignments[transferModal.emp.id].supervisor_name || 'Sin asignar'}</strong>).
+                                            </div>
+                                            <div className="text-[11px] text-amber-200 font-semibold">
+                                                🔔 Al confirmar, saldrá de esa cuadrilla para integrarse a <u>{activeCuadrilla?.nombre}</u> y se enviará una <strong>alerta automática al supervisor afectado ({globalAssignments[transferModal.emp.id].supervisor_name || 'Supervisión'})</strong> informándole quién se le retiró.
+                                            </div>
                                         </div>
                                     </div>
                                 )}

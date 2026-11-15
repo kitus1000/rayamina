@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { User, ChevronDown, LogOut, Settings, ShieldCheck, Sun, Moon, Printer, Eye } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import NotificationBell from './notification-bell'
 import { supabase } from '@/lib/supabase'
 import { useRouter, usePathname } from 'next/navigation'
 
@@ -243,6 +244,8 @@ export default function Topbar() {
                         </>
                     )}
                 </button>
+
+                <NotificationBell />
 
                 {/* User Profile Dropdown */}
                 <div className="relative pl-2.5 border-l border-slate-800" ref={menuRef}>
