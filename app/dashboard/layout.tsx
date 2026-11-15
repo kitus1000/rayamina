@@ -127,7 +127,7 @@ export default function DashboardLayout({
 
                 <Topbar />
 
-                <main className="flex-1 overflow-auto p-6 relative">
+                <main className="flex-1 overflow-auto p-4 md:p-6 pb-24 md:pb-6 relative">
                     <AnimatedBackground />
 
                     {/* Membrete Oficial para Exportación PDF / Impresión (Visible en todos los PDFs) */}

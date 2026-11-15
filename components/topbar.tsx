@@ -93,19 +93,19 @@ export default function Topbar() {
     }
 
     return (
-        <header className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 z-30 sticky top-0 shadow-sm html2pdf__ignore">
+        <header className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between pl-16 pr-3 md:px-6 z-30 sticky top-0 shadow-sm html2pdf__ignore">
             {/* Left: Dynamic Pillar Badge, Title & Role Switcher */}
-            <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center gap-2 md:gap-3 min-w-0">
                 <span className={`hidden lg:inline-flex items-center px-2.5 py-1 text-[11px] font-black uppercase tracking-wider rounded-lg border shrink-0 ${currentMeta.pillarColor}`}>
                     {currentMeta.pillar}
                 </span>
-                <h2 className="text-base md:text-lg font-black text-white tracking-tight truncate">{currentMeta.title}</h2>
+                <h2 className="text-sm sm:text-base md:text-lg font-black text-white tracking-tight truncate">{currentMeta.title}</h2>
                 <span className="hidden xl:inline-flex px-2.5 py-0.5 bg-amber-500/15 text-amber-400 text-xs font-bold rounded-full border border-amber-500/30 shrink-0">
                     Semana 38 (21-27 Sep)
                 </span>
 
                 {/* Selector de Jerarquía / Rol en Vivo */}
-                <div className="flex items-center gap-1.5 bg-slate-950/90 border border-indigo-500/40 rounded-xl px-2.5 py-1 shadow-sm shrink-0">
+                <div className="hidden sm:flex items-center gap-1.5 bg-slate-950/90 border border-indigo-500/40 rounded-xl px-2.5 py-1 shadow-sm shrink-0">
                     <Sparkles size={13} className="text-indigo-400 shrink-0" />
                     <span className="text-[10px] font-black text-indigo-400 uppercase hidden md:inline">Rol Activo:</span>
                     <select
