@@ -1,0 +1,34 @@
+[
+  {
+    "email": "jesus12398@gmail.com",
+    "role": "SUPER_ADMIN",
+    "views_json": [
+      "/dashboard",
+      "/dashboard/semana",
+      "/dashboard/operacion/reportes-diarios",
+      "/dashboard/chat",
+      "/dashboard/nomina",
+      "/dashboard/catalogos",
+      "/dashboard/configuracion/usuarios",
+      "/dashboard/catalogos/empleados",
+      "/dashboard/configuracion"
+    ]
+  },
+  {
+    "email": "kikus_100@hotmail.com",
+    "role": "JEFE_PLANEACION",
+    "views_json": [
+      "/dashboard",
+      "/dashboard/semana",
+      "/dashboard/chat"
+    ]
+  },
+  {
+    "email": "jesus@gmail.com",
+    "role": "SUPERVISOR",
+    "views_json": [
+      "/dashboard",
+      "/dashboard/operacion/reportes-diarios"
+    ]
+  }
+]

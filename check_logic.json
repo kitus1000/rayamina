@@ -1,0 +1,23 @@
+[
+  {
+    "label": "Panel Principal",
+    "items": [
+      {
+        "name": "Dashboard Global",
+        "href": "/dashboard"
+      },
+      {
+        "name": "Semana en Curso",
+        "href": "/dashboard/semana"
+      },
+      {
+        "name": "Reportes Diarios",
+        "href": "/dashboard/operacion/reportes-diarios"
+      },
+      {
+        "name": "Blog de Tareas",
+        "href": "/dashboard/chat"
+      }
+    ]
+  }
+]

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acceso al Sistema Raya</title>
+    <style>
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #020617; color: #f1f5f9; margin: 0; padding: 0; }
+        .container { max-width: 600px; margin: 40px auto; background-color: #0f172a; border-radius: 16px; overflow: hidden; border: 1px solid #1e293b; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+        .header { background: linear-gradient(to right, #020617, #0f172a); padding: 40px 30px; text-align: center; border-bottom: 2px solid #f59e0b; }
+        .logo { font-size: 28px; font-weight: 800; color: #ffffff; letter-spacing: 2px; text-transform: uppercase; margin: 0; }
+        .logo-subtitle { color: #f59e0b; font-size: 12px; letter-spacing: 4px; text-transform: uppercase; margin-top: 5px; }
+        .content { padding: 40px 30px; }
+        .title { font-size: 24px; font-weight: bold; margin-bottom: 20px; color: #ffffff; }
+        .text { font-size: 16px; line-height: 1.6; color: #94a3b8; margin-bottom: 30px; }
+        .button-container { text-align: center; margin: 40px 0; }
+        .button { background: linear-gradient(135deg, #d97706, #f59e0b); color: #ffffff !important; font-weight: bold; text-decoration: none; padding: 16px 36px; border-radius: 8px; font-size: 16px; display: inline-block; box-shadow: 0 10px 15px -3px rgba(245, 158, 11, 0.2); }
+        .url-box { background-color: #020617; border: 1px dashed #334155; padding: 15px; border-radius: 8px; font-size: 12px; color: #64748b; word-break: break-all; text-align: center; }
+        .footer { background-color: #020617; padding: 20px; text-align: center; color: #475569; font-size: 12px; border-top: 1px solid #1e293b; }
+        .highlight { color: #f1f5f9; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 class="logo">LA RAYA</h1>
+            <div class="logo-subtitle">Mining Ops System</div>
+        </div>
+        <div class="content">
+            <h2 class="title">Acceso Seguro Requerido</h2>
+            <p class="text">Hola <span class="highlight">{{ .Email }}</span>,</p>
+            <p class="text">Para acceder al Sistema de Operaciones Mineras "La Raya", haz clic en el botón a continuación. Este enlace es único para ti y expirará por seguridad en unos minutos.</p>
+            
+            <div class="button-container">
+                <a href="{{ .ConfirmationURL }}" class="button">Verificar y Acceder</a>
+            </div>
+            
+            <p class="text" style="font-size: 14px;">Si no puedes hacer clic en el botón, copia y pega este enlace de forma segura en tu navegador de preferencia:</p>
+            <div class="url-box">{{ .ConfirmationURL }}</div>
+        </div>
+        <div class="footer">
+            <p>© 2024 La Raya Mining Company. Todos los derechos reservados.</p>
+            <p>Este es un correo automático del sistema central. Por favor no respondas a este mensaje.</p>
+        </div>
+    </div>
+</body>
+</html>
