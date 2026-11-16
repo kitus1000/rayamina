@@ -7,7 +7,7 @@ import Sidebar from '@/components/sidebar'
 import Topbar from '@/components/topbar'
 import AnimatedBackground from '@/components/animated-background'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ShieldAlert, ArrowRight, RefreshCw } from 'lucide-react'
+import { ShieldAlert, ArrowRight, RefreshCw, Eye, Smartphone, RotateCcw } from 'lucide-react'
 import AuthPage from '../login/page'
 
 export default function DashboardLayout({
@@ -19,6 +19,9 @@ export default function DashboardLayout({
         user,
         loading,
         sysRole,
+        isRealSuperAdmin,
+        previewProfile,
+        setPreviewProfile,
         isViewAllowed,
         getFirstAllowedPath,
         refreshUserConfig,
@@ -103,6 +106,35 @@ export default function DashboardLayout({
                 </AnimatePresence>
 
                 <Topbar />
+
+                {/* Banner activo cuando el Super Admin está inspeccionando las pantallas de otro perfil o usuario */}
+                {isRealSuperAdmin && previewProfile && (
+                    <div className="bg-amber-500/15 border-b border-amber-500/40 px-4 py-2 flex flex-wrap items-center justify-between gap-2 z-20 html2pdf__ignore">
+                        <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
+                            <Eye size={15} className="text-amber-400 shrink-0" />
+                            <span>
+                                <strong>Modo Inspección Super Admin:</strong> Estás viendo pantallas, avances y permisos como{' '}
+                                <span className="underline font-black text-white">{previewProfile.label}</span> ({sysRole})
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => router.push('/mobile')}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-black flex items-center gap-1 cursor-pointer"
+                            >
+                                <Smartphone size={12} /> Ver este perfil en Modo APK (Celular)
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setPreviewProfile(null)}
+                                className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-black flex items-center gap-1 cursor-pointer"
+                            >
+                                <RotateCcw size={12} /> Volver a Super Admin
+                            </button>
+                        </div>
+                    </div>
+                )}
 
                 <main className="flex-1 min-w-0 overflow-x-auto overflow-y-auto p-3 sm:p-4 md:p-6 pb-24 md:pb-6 relative">
                     <AnimatedBackground />

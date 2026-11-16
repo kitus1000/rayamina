@@ -37,7 +37,7 @@ import {
   CheckCheck,
   ArrowRight,
 } from 'lucide-react-native';
-import { useMobileAuth } from '../lib/auth-context';
+import { useMobileAuth, ROLE_META, MobileRole } from '../lib/auth-context';
 import { useResponsiveLayout } from '../lib/responsive';
 import {
   OpsNotification,
@@ -99,6 +99,10 @@ export default function MobileShell({
 
   const {
     user,
+    sysRole,
+    isRealSuperAdmin,
+    previewRole,
+    setPreviewRole,
     loading,
     theme: mode,
     toggleTheme,
@@ -561,6 +565,29 @@ export default function MobileShell({
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* BANNER ACTIVO DE SIMULACIÓN DE PERFIL (SOLO SUPER ADMIN) */}
+      {isRealSuperAdmin && previewRole && (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => setPreviewRole(null)}
+          style={{
+            backgroundColor: '#F59E0B',
+            paddingHorizontal: 12,
+            paddingVertical: 6,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <Text style={{ color: '#0F172A', fontSize: 10.5, fontWeight: '900', flex: 1 }}>
+            👁️ Modo Super Admin: Viendo APK como {roleMeta.shortLabel}
+          </Text>
+          <Text style={{ color: '#0F172A', fontSize: 10, fontWeight: '900', textDecorationLine: 'underline' }}>
+            Volver a Admin
+          </Text>
+        </TouchableOpacity>
+      )}
 
       {/* CONTENIDO PRINCIPAL CON ANIMACIÓN DE ENTRADA Y BLOQUEO DE SEGURIDAD */}
       <Animated.View
@@ -1093,6 +1120,56 @@ export default function MobileShell({
                 <X size={18} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
+
+            {isRealSuperAdmin && (
+              <View
+                style={[
+                  styles.syncExplainBox,
+                  {
+                    backgroundColor: colors.bgElevated,
+                    borderColor: '#F59E0B',
+                    marginBottom: 10,
+                  },
+                ]}
+              >
+                <Text style={styles.syncExplainTitle}>
+                  👁️ EXCLUSIVO SUPER ADMIN: VER PANTALLAS Y AVANCES DE OTRO PERFIL
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                  {(Object.keys(ROLE_META) as MobileRole[]).map((rKey) => {
+                    const m = ROLE_META[rKey];
+                    const active = sysRole === rKey;
+                    return (
+                      <TouchableOpacity
+                        key={rKey}
+                        onPress={() => {
+                          setPreviewRole(rKey === 'SUPER_ADMIN' ? null : rKey);
+                          setCredentialModalOpen(false);
+                        }}
+                        style={{
+                          paddingHorizontal: 10,
+                          paddingVertical: 6,
+                          borderRadius: 9,
+                          borderWidth: 1,
+                          backgroundColor: active ? '#F59E0B' : colors.bgCard,
+                          borderColor: active ? '#D97706' : colors.border,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 10,
+                            fontWeight: '900',
+                            color: active ? '#0F172A' : colors.textPrimary,
+                          }}
+                        >
+                          {m.shortLabel}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
 
             <View
               style={[

@@ -1,18 +1,40 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { User, ChevronDown, LogOut, Settings, ShieldCheck, Sun, Moon, Printer, Eye } from 'lucide-react'
-import { useAuth } from '@/lib/auth-context'
+import { User, ChevronDown, LogOut, Settings, ShieldCheck, Sun, Moon, Printer, Eye, Smartphone, Monitor, Users } from 'lucide-react'
+import { DEFAULT_ROLE_VIEWS, resolveFirstAllowedPath, useAuth } from '@/lib/auth-context'
 import NotificationBell from './notification-bell'
 import { supabase } from '@/lib/supabase'
 import { useRouter, usePathname } from 'next/navigation'
 
+const ROLES_PREVIEW_LIST = [
+    { role: 'SUPER_ADMIN', label: '👑 Super Admin (Vista Total)' },
+    { role: 'DIRECTOR_OPERATIVO', label: '🏛️ Director Operativo' },
+    { role: 'GERENTE', label: '⭐ Gerente de Operaciones' },
+    { role: 'SUPERINTENDENTE', label: '⛏️ Superintendente / Jefe Mina' },
+    { role: 'JEFE_PLANEACION', label: '📐 Jefe de Planeación' },
+    { role: 'SUPERVISOR', label: '📋 Supervisor de Turno' },
+]
+
 export default function Topbar() {
-    const { user, sysRole, sysUserId, fullName, signOut, isViewAllowed } = useAuth()
+    const {
+        user,
+        sysRole,
+        isRealSuperAdmin,
+        previewProfile,
+        setPreviewProfile,
+        sysUserId,
+        fullName,
+        signOut,
+        isViewAllowed,
+    } = useAuth()
     const router = useRouter()
     const pathname = usePathname()
     const [isMenuOpen, setIsMenuOpen] = useState(false)
+    const [isPreviewOpen, setIsPreviewOpen] = useState(false)
+    const [sysUsersList, setSysUsersList] = useState<any[]>([])
     const menuRef = useRef<HTMLDivElement>(null)
+    const previewRef = useRef<HTMLDivElement>(null)
     const [profile, setProfile] = useState<{ nickname?: string; avatar_url?: string }>({})
     const [theme, setTheme] = useState<'light' | 'dark'>('light')
 
@@ -152,10 +174,26 @@ export default function Topbar() {
             if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
                 setIsMenuOpen(false)
             }
+            if (previewRef.current && !previewRef.current.contains(event.target as Node)) {
+                setIsPreviewOpen(false)
+            }
         }
         document.addEventListener('mousedown', handleClickOutside)
         return () => document.removeEventListener('mousedown', handleClickOutside)
     }, [])
+
+    useEffect(() => {
+        if (isRealSuperAdmin) {
+            supabase
+                .from('sys_users')
+                .select('id, email, full_name, role, views_json, active')
+                .eq('active', true)
+                .order('full_name')
+                .then(({ data }) => {
+                    if (data) setSysUsersList(data)
+                })
+        }
+    }, [isRealSuperAdmin])
 
     useEffect(() => {
         if (sysUserId) {
@@ -199,17 +237,176 @@ export default function Topbar() {
                 </div>
             </div>
 
-            {/* Right: Configurar Visiones (si es Admin), PDF Export, Theme Toggle, Profile */}
-            <div className="flex items-center gap-2 shrink-0">
-                {isViewAllowed('/dashboard/configuracion/visiones') && (
+            {/* Right: Selector Modo Web / Modo APK, Simulador de Perfiles SuperAdmin, Vistas, PDF, Tema, Perfil */}
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                {/* Conmutador Directo Modo Web vs Modo APK (Celular) */}
+                <div className="flex items-center bg-slate-950 border border-slate-700 rounded-xl p-0.5 shadow-inner">
                     <button
-                        onClick={() => router.push('/dashboard/configuracion/visiones')}
-                        title="Configurar qué vistas ve cada usuario en Web y en el APK Android"
-                        className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 text-xs font-black transition-all shadow-sm cursor-pointer"
+                        type="button"
+                        onClick={() => router.push('/dashboard')}
+                        title="Vista de Escritorio (Modo Web)"
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 text-[11px] font-black transition-all cursor-pointer"
                     >
-                        <Eye size={14} />
-                        <span>Vistas APK / Web</span>
+                        <Monitor size={13} />
+                        <span className="hidden md:inline">Modo Web</span>
                     </button>
+                    <button
+                        type="button"
+                        onClick={() => router.push('/mobile')}
+                        title="Abrir Simulador Interactivo de Celular (Modo APK)"
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-emerald-400 hover:bg-emerald-500/20 text-[11px] font-black transition-all cursor-pointer"
+                    >
+                        <Smartphone size={13} />
+                        <span className="hidden sm:inline">Modo APK</span>
+                    </button>
+                </div>
+
+                {/* Selector Exclusivo SuperAdmin: Ver Pantallas y Avances como otro Perfil / Usuario */}
+                {isRealSuperAdmin && (
+                    <div className="relative" ref={previewRef}>
+                        <button
+                            type="button"
+                            onClick={() => setIsPreviewOpen(!isPreviewOpen)}
+                            title="Exclusivo SuperAdmin: Ver pantallas y avances como otro perfil o usuario"
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-black transition-all cursor-pointer ${
+                                previewProfile
+                                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/20'
+                                    : 'bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border-purple-500/40'
+                            }`}
+                        >
+                            <Eye size={14} />
+                            <span className="hidden lg:inline max-w-[140px] truncate">
+                                {previewProfile ? `Viendo: ${previewProfile.label}` : 'Ver como Perfil'}
+                            </span>
+                            <ChevronDown size={13} />
+                        </button>
+
+                        {isPreviewOpen && (
+                            <div className="absolute right-0 mt-2 w-72 max-h-[80vh] overflow-y-auto bg-slate-900 rounded-2xl shadow-2xl border-2 border-purple-500/50 p-2 z-50 space-y-2">
+                                <div className="px-2 py-1 border-b border-slate-800">
+                                    <div className="text-[10px] font-black uppercase tracking-wider text-purple-400">
+                                        👁️ Inspector de Perfiles (Super Admin)
+                                    </div>
+                                    <p className="text-[11px] text-slate-400">
+                                        Revisa qué pantallas y avances ve cada perfil o usuario en Web y APK:
+                                    </p>
+                                </div>
+
+                                <div className="space-y-1">
+                                    <div className="px-2 text-[10px] font-black uppercase text-slate-500">
+                                        Simular por Nivel de Mando:
+                                    </div>
+                                    {ROLES_PREVIEW_LIST.map((r) => {
+                                        const isCurrent =
+                                            (!previewProfile && r.role === 'SUPER_ADMIN') ||
+                                            (previewProfile?.role === r.role && !previewProfile?.userId)
+                                        return (
+                                            <button
+                                                key={r.role}
+                                                type="button"
+                                                onClick={() => {
+                                                    setIsPreviewOpen(false)
+                                                    if (r.role === 'SUPER_ADMIN') {
+                                                        setPreviewProfile(null)
+                                                    } else {
+                                                        const views = DEFAULT_ROLE_VIEWS[r.role] || []
+                                                        setPreviewProfile({
+                                                            role: r.role,
+                                                            label: r.label.replace(/^[^\s]+\s/, ''),
+                                                            views,
+                                                        })
+                                                        const first = resolveFirstAllowedPath(r.role, views)
+                                                        router.push(first)
+                                                    }
+                                                }}
+                                                className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-between transition-colors cursor-pointer ${
+                                                    isCurrent
+                                                        ? 'bg-amber-500 text-slate-950 font-black'
+                                                        : 'text-slate-200 hover:bg-slate-800'
+                                                }`}
+                                            >
+                                                <span>{r.label}</span>
+                                                {isCurrent && <span className="text-[10px]">ACTIVO</span>}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+
+                                {sysUsersList.length > 0 && (
+                                    <div className="space-y-1 pt-2 border-t border-slate-800">
+                                        <div className="px-2 text-[10px] font-black uppercase text-emerald-400 flex items-center gap-1">
+                                            <Users size={11} /> Simular Usuario Específico:
+                                        </div>
+                                        {sysUsersList.map((u) => {
+                                            const isUserSelected = previewProfile?.userId === u.id
+                                            return (
+                                                <button
+                                                    key={u.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setIsPreviewOpen(false)
+                                                        if (u.role === 'SUPER_ADMIN') {
+                                                            setPreviewProfile(null)
+                                                        } else {
+                                                            const views = Array.isArray(u.views_json)
+                                                                ? u.views_json
+                                                                : DEFAULT_ROLE_VIEWS[u.role] || []
+                                                            setPreviewProfile({
+                                                                role: u.role,
+                                                                label: u.full_name || u.email,
+                                                                userId: u.id,
+                                                                userEmail: u.email,
+                                                                views,
+                                                            })
+                                                            const first = resolveFirstAllowedPath(u.role, views)
+                                                            router.push(first)
+                                                        }
+                                                    }}
+                                                    className={`w-full text-left px-3 py-2 rounded-xl text-xs transition-colors cursor-pointer ${
+                                                        isUserSelected
+                                                            ? 'bg-emerald-500 text-slate-950 font-black'
+                                                            : 'text-slate-300 hover:bg-slate-800 font-semibold'
+                                                    }`}
+                                                >
+                                                    <div className="truncate">{u.full_name}</div>
+                                                    <div
+                                                        className={`text-[10px] truncate ${
+                                                            isUserSelected ? 'text-slate-900' : 'text-slate-500'
+                                                        }`}
+                                                    >
+                                                        {u.role} • {u.email}
+                                                    </div>
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                )}
+
+                                <div className="pt-2 border-t border-slate-800 flex gap-1.5">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsPreviewOpen(false)
+                                            router.push('/dashboard/configuracion/visiones')
+                                        }}
+                                        className="flex-1 py-2 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold text-center cursor-pointer"
+                                    >
+                                        ⚙️ Configurar Vistas
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsPreviewOpen(false)
+                                            router.push('/mobile')
+                                        }}
+                                        className="flex-1 py-2 px-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-black text-center cursor-pointer"
+                                    >
+                                        📱 Ver en APK
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 )}
 
                 {/* Botón Universal Exportar a PDF */}

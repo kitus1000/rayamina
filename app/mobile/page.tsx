@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { useAuth } from '@/lib/auth-context'
+import { DEFAULT_ROLE_VIEWS, useAuth } from '@/lib/auth-context'
 import { toast } from 'sonner'
 import {
     Menu,
@@ -127,6 +127,9 @@ export default function AndroidMobileAppPage() {
     const {
         user,
         sysRole,
+        isRealSuperAdmin,
+        previewProfile,
+        setPreviewProfile,
         fullName,
         loading: authLoading,
         allowedViews,
@@ -135,7 +138,26 @@ export default function AndroidMobileAppPage() {
         signOut,
     } = useAuth()
     const rawRole = (sysRole || 'SUPERVISOR') as RoleKey
-    const activeRole: RoleKey = rawRole in ROLE_CONFIG ? rawRole : 'SUPERVISOR'
+    const activeRole: RoleKey =
+        rawRole in ROLE_CONFIG
+            ? rawRole
+            : (rawRole as string) === 'JEFE_MINA'
+            ? 'SUPERINTENDENTE'
+            : 'SUPERVISOR'
+
+    const handleSelectPreviewRole = (role: RoleKey) => {
+        if (!isRealSuperAdmin) return
+        if (role === 'SUPER_ADMIN') {
+            setPreviewProfile(null)
+        } else {
+            setPreviewProfile({
+                role,
+                label: ROLE_CONFIG[role].shortLabel,
+                views: DEFAULT_ROLE_VIEWS[role] || [],
+            })
+        }
+        setRoleModalOpen(false)
+    }
 
     const [activeScreen, setActiveScreen] = useState<MobileScreenId>('HOME')
     const [drawerOpen, setDrawerOpen] = useState(false)
@@ -373,13 +395,13 @@ export default function AndroidMobileAppPage() {
         }
     }
 
-    const loadAllSupabaseData = useCallback(async () => {
-        setLoading(true)
+    const loadAllSupabaseData = useCallback(async (silent = false) => {
+        if (!silent) setLoading(true)
         try {
             const [
-                { data: sqData },
-                { data: memData },
-                { data: empData },
+                sqRes,
+                memRes,
+                empRes,
                 { data: repData },
                 { data: repItemsData },
                 { data: planesData },
@@ -395,16 +417,16 @@ export default function AndroidMobileAppPage() {
             ] = await Promise.all([
                 supabase
                     .from('cat_cuadrillas')
-                    .select('id, nombre, codigo, activo, cat_turnos(nombre, codigo), mine_sites(nombre_mina)')
+                    .select('*, cat_turnos(nombre, codigo), mine_sites(nombre_mina)')
                     .eq('activo', true)
                     .order('nombre'),
                 supabase
                     .from('cat_cuadrillas_miembros')
-                    .select('id, cuadrilla_id, empleado_id, rol_operativo_id, activo'),
+                    .select('*'),
                 supabase
                     .from('rh_employees')
                     .select(
-                        'id, employee_code, first_name, last_name, sueldo_diario_base, is_jefe, status, role_id, rol_operativo_default_id, cat_puestos(nombre), cat_roles_operativos(nombre)'
+                        '*, cat_puestos(nombre), cat_roles_operativos(nombre)'
                     )
                     .order('first_name'),
                 supabase
@@ -437,37 +459,43 @@ export default function AndroidMobileAppPage() {
                 supabase.from('sys_config').select('value_json').eq('key_name', SEC_STORE_KEY).maybeSingle(),
             ])
 
+            let sqData = sqRes.data
+            if (!sqData) {
+                const fbSq = await supabase.from('cat_cuadrillas').select('*').eq('activo', true).order('nombre')
+                sqData = fbSq.data || []
+            }
+            const memData = memRes.data || []
+            const empData = empRes.data || []
+
             const activeSquads = sqData || []
             setCuadrillas(activeSquads)
-            if (activeSquads.length > 0 && !selectedSquadId) {
-                setSelectedSquadId(activeSquads[0].id)
-                setRepCuadrillaId(activeSquads[0].id)
+            if (activeSquads.length > 0) {
+                setSelectedSquadId((prev) =>
+                    prev && activeSquads.some((s: any) => s.id === prev) ? prev : activeSquads[0].id
+                )
+                setRepCuadrillaId((prev) => prev || activeSquads[0].id)
             }
 
-            if (turnosData && turnosData.length > 0 && !repTurnoId) {
+            if (turnosData && turnosData.length > 0) {
                 setTurnos(turnosData)
-                setRepTurnoId(turnosData[0].id)
-            } else if (turnosData) {
-                setTurnos(turnosData)
+                setRepTurnoId((prev) => prev || turnosData[0].id)
             }
 
-            if (minasData && minasData.length > 0 && !repMinaId) {
+            if (minasData && minasData.length > 0) {
                 setMinas(minasData)
-                setRepMinaId(minasData[0].id)
-            } else if (minasData) {
-                setMinas(minasData)
+                setRepMinaId((prev) => prev || minasData[0].id)
             }
 
             if (locsData && locsData.length > 0) {
                 setUbicaciones(locsData)
-                if (!newMetaLocId) setNewMetaLocId(locsData[0].id)
-                if (!actLocId) setActLocId(locsData[0].id)
+                setNewMetaLocId((prev) => prev || locsData[0].id)
+                setActLocId((prev) => prev || locsData[0].id)
             }
 
             if (prodsData && prodsData.length > 0) {
                 setProductos(prodsData)
-                if (!newMetaProdId) setNewMetaProdId(prodsData[0].id)
-                if (!actProdId) setActProdId(prodsData[0].id)
+                setNewMetaProdId((prev) => prev || prodsData[0].id)
+                setActProdId((prev) => prev || prodsData[0].id)
             }
 
             if (equipsData) setEquipos(equipsData)
@@ -540,10 +568,10 @@ export default function AndroidMobileAppPage() {
         } finally {
             setLoading(false)
         }
-    }, [selectedSquadId, repTurnoId, repMinaId, newMetaLocId, newMetaProdId, actLocId, actProdId])
+    }, [])
 
     useEffect(() => {
-        loadAllSupabaseData()
+        loadAllSupabaseData(false)
     }, [loadAllSupabaseData])
 
     const navigateToScreen = (screen: MobileScreenId, _requiresJefatura = false) => {
@@ -616,7 +644,6 @@ export default function AndroidMobileAppPage() {
                         {
                             cuadrilla_id: targetSquadId,
                             empleado_id: worker.id,
-                            activo: true,
                         },
                     ])
                 }
@@ -645,7 +672,7 @@ export default function AndroidMobileAppPage() {
                 toast.success(`${worker.fullName} asignado a ${targetSquadObj?.nombre}`)
                 setSelectedWorkerForTransfer(null)
                 setTransferAnimationState(null)
-                await loadAllSupabaseData()
+                await loadAllSupabaseData(true)
             } catch (e: any) {
                 setTransferAnimationState(null)
                 toast.error(e?.message || 'Error al mover trabajador')
@@ -1115,7 +1142,55 @@ export default function AndroidMobileAppPage() {
     }
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col max-w-md mx-auto shadow-2xl border-x border-slate-800 relative overflow-hidden">
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center">
+            {/* BARRA SUPERIOR GLOBAL: CONMUTADOR MODO WEB vs MODO APK Y SIMULADOR DE PERFILES (SUPER ADMIN) */}
+            <div className="w-full bg-slate-900 border-b border-slate-800 px-3 py-2 flex flex-wrap items-center justify-between gap-2 z-40 sticky top-0">
+                <div className="flex items-center gap-2">
+                    <div className="flex items-center bg-slate-950 border border-slate-700 rounded-xl p-0.5">
+                        <Link
+                            href="/dashboard"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 text-xs font-black transition-all"
+                        >
+                            <Monitor size={14} className="text-sky-400" />
+                            <span>Modo Web (Escritorio)</span>
+                        </Link>
+                        <button
+                            type="button"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-black shadow"
+                        >
+                            <Smartphone size={14} />
+                            <span>Modo APK (Celular)</span>
+                        </button>
+                    </div>
+                </div>
+
+                {isRealSuperAdmin && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-black uppercase text-purple-400 mr-1">
+                            👁️ Ver APK como:
+                        </span>
+                        {(Object.keys(ROLE_CONFIG) as RoleKey[]).map((rKey) => {
+                            const isAct = activeRole === rKey && (!previewProfile?.userId || rKey === 'SUPER_ADMIN')
+                            return (
+                                <button
+                                    key={rKey}
+                                    type="button"
+                                    onClick={() => handleSelectPreviewRole(rKey)}
+                                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black border transition-all cursor-pointer ${
+                                        isAct
+                                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
+                                            : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-600'
+                                    }`}
+                                >
+                                    {ROLE_CONFIG[rKey].shortLabel}
+                                </button>
+                            )
+                        })}
+                    </div>
+                )}
+            </div>
+
+        <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col max-w-md mx-auto shadow-2xl border-x border-slate-800 relative overflow-hidden">
             {/* BARRA LÁSER ANIMADA EN CADA CAMBIO DE PANTALLA */}
             <AnimatePresence mode="wait">
                 <motion.div
@@ -2691,7 +2766,7 @@ export default function AndroidMobileAppPage() {
                 )}
             </AnimatePresence>
 
-            {/* MODAL INFORMATIVO DE CREDENCIAL DE SEGURIDAD Y VISTAS ASIGNADAS (SOLO LECTURA) */}
+            {/* MODAL DE CREDENCIAL Y SIMULADOR DE PERFILES (PARA SUPER_ADMIN) */}
             <AnimatePresence>
                 {roleModalOpen && (
                     <motion.div
@@ -2700,12 +2775,12 @@ export default function AndroidMobileAppPage() {
                         exit={{ opacity: 0 }}
                         className="fixed inset-0 bg-slate-950/80 z-50 flex items-center justify-center p-4"
                     >
-                        <div className="w-full max-w-sm bg-slate-900 border-2 border-emerald-500 rounded-3xl p-5 space-y-3">
+                        <div className="w-full max-w-sm bg-slate-900 border-2 border-emerald-500 rounded-3xl p-5 space-y-3 max-h-[85vh] overflow-y-auto">
                             <div className="flex justify-between items-center">
                                 <div className="flex items-center gap-2">
                                     <ShieldCheck size={18} className="text-emerald-400" />
                                     <h3 className="text-base font-black text-white">
-                                        Credencial Sincronizada
+                                        {isRealSuperAdmin ? 'Simulador de Perfiles APK' : 'Credencial Sincronizada'}
                                     </h3>
                                 </div>
                                 <button
@@ -2726,6 +2801,36 @@ export default function AndroidMobileAppPage() {
                                     {currentRoleInfo.description}
                                 </div>
                             </div>
+
+                            {isRealSuperAdmin && (
+                                <div className="p-3 rounded-2xl bg-slate-950 border border-purple-500/40 space-y-2">
+                                    <div className="text-[10px] font-black uppercase text-purple-400">
+                                        👁️ Exclusivo Super Admin — Cambiar Perfil en Vivo:
+                                    </div>
+                                    <div className="grid grid-cols-1 gap-1.5">
+                                        {(Object.keys(ROLE_CONFIG) as RoleKey[]).map((rKey) => {
+                                            const info = ROLE_CONFIG[rKey]
+                                            const isSelected = activeRole === rKey
+                                            return (
+                                                <button
+                                                    key={rKey}
+                                                    type="button"
+                                                    onClick={() => handleSelectPreviewRole(rKey)}
+                                                    className={`w-full text-left p-2.5 rounded-xl border text-xs font-bold flex items-center justify-between transition-all cursor-pointer ${
+                                                        isSelected
+                                                            ? 'bg-amber-500 text-slate-950 border-amber-400 font-black'
+                                                            : 'bg-slate-900 text-slate-200 border-slate-800 hover:border-slate-700'
+                                                    }`}
+                                                >
+                                                    <span>{info.label}</span>
+                                                    {isSelected && <span className="text-[9px] font-black">ACTIVO</span>}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-1.5">
                                 <div className="text-[10px] font-black uppercase text-emerald-400">
                                     Seguridad de Precios, Tonelaje y Nómina
@@ -2805,6 +2910,7 @@ export default function AndroidMobileAppPage() {
                     </motion.div>
                 )}
             </AnimatePresence>
+        </div>
         </div>
     )
 }

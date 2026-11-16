@@ -173,10 +173,9 @@ export default function NewReportWizard() {
                 .from('cat_cuadrillas_miembros')
                 .select(
                     `
-                    empleado_id, rol_operativo_id,
+                    *,
                     rh_employees (
-                        id, first_name, last_name, employee_code,
-                        role_id, rol_operativo_default_id,
+                        *,
                         cat_roles_operativos ( id, nombre )
                     )
                 `

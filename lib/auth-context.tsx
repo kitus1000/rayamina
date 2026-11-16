@@ -51,6 +51,7 @@ export const DEFAULT_ROLE_VIEWS: Record<string, string[]> = {
         '/dashboard/catalogos',
     ],
     JEFE_PLANEACION: [
+        '/dashboard',
         '/dashboard/semana',
         '/dashboard/catalogos/ubicaciones',
         '/dashboard/catalogos/productos-mina',
@@ -59,6 +60,7 @@ export const DEFAULT_ROLE_VIEWS: Record<string, string[]> = {
         '/dashboard/chat',
     ],
     SUPERVISOR: [
+        '/dashboard',
         '/dashboard/catalogos/cuadrillas',
         '/dashboard/operacion/reportes-diarios',
         '/dashboard/chat',
@@ -125,10 +127,24 @@ export function resolveFirstAllowedPath(
     return '/dashboard/operacion/reportes-diarios'
 }
 
+export interface PreviewProfileConfig {
+    role: string
+    label: string
+    userId?: string | null
+    userEmail?: string | null
+    views?: string[] | null
+}
+
+const PREVIEW_STORAGE_KEY = 'raya_superadmin_preview_v1'
+
 interface AuthContextType {
     user: User | null
     session: Session | null
     sysRole: string | null
+    realRole: string | null
+    isRealSuperAdmin: boolean
+    previewProfile: PreviewProfileConfig | null
+    setPreviewProfile: (profile: PreviewProfileConfig | null) => void
     sysUserId: string | null
     fullName: string | null
     permissions: SysPermissions | null
@@ -149,18 +165,54 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<User | null>(null)
     const [session, setSession] = useState<Session | null>(null)
-    const [sysRole, setSysRole] = useState<string | null>(null)
+    const [realRole, setRealRole] = useState<string | null>(null)
     const [sysUserId, setSysUserId] = useState<string | null>(null)
-    const [fullName, setFullName] = useState<string | null>(null)
+    const [realFullName, setRealFullName] = useState<string | null>(null)
     const [permissions, setPermissions] = useState<SysPermissions | null>(null)
-    const [allowedViews, setAllowedViews] = useState<string[] | null>(null)
+    const [realAllowedViews, setRealAllowedViews] = useState<string[] | null>(null)
+    const [previewProfile, setPreviewProfileState] = useState<PreviewProfileConfig | null>(null)
     const [loading, setLoading] = useState(true)
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            try {
+                const savedPreview = sessionStorage.getItem(PREVIEW_STORAGE_KEY)
+                if (savedPreview) {
+                    setPreviewProfileState(JSON.parse(savedPreview))
+                }
+            } catch {
+                // ignore parse error
+            }
+        }
+    }, [])
+
+    const setPreviewProfile = useCallback(
+        (profile: PreviewProfileConfig | null) => {
+            if (realRole !== 'SUPER_ADMIN') {
+                setPreviewProfileState(null)
+                if (typeof window !== 'undefined') {
+                    sessionStorage.removeItem(PREVIEW_STORAGE_KEY)
+                }
+                return
+            }
+            setPreviewProfileState(profile)
+            if (typeof window !== 'undefined') {
+                if (profile) {
+                    sessionStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(profile))
+                } else {
+                    sessionStorage.removeItem(PREVIEW_STORAGE_KEY)
+                }
+            }
+        },
+        [realRole]
+    )
 
     const clearSessionStorage = () => {
         if (typeof window !== 'undefined') {
             localStorage.removeItem('manual_user')
             localStorage.removeItem('demo_mode')
             localStorage.removeItem('demo_role')
+            sessionStorage.removeItem(PREVIEW_STORAGE_KEY)
         }
     }
 
@@ -187,16 +239,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
 
             if (finalUser && finalUser.active !== false) {
-                setSysRole(finalUser.role)
+                setRealRole(finalUser.role)
                 setSysUserId(finalUser.id)
-                setFullName(finalUser.full_name || finalUser.nickname || finalUser.email)
+                setRealFullName(finalUser.full_name || finalUser.nickname || finalUser.email)
+                if (finalUser.role !== 'SUPER_ADMIN') {
+                    setPreviewProfileState(null)
+                    if (typeof window !== 'undefined') {
+                        sessionStorage.removeItem(PREVIEW_STORAGE_KEY)
+                    }
+                }
 
                 const configuredViews =
                     Array.isArray(finalUser.views_json)
                         ? finalUser.views_json
                         : DEFAULT_ROLE_VIEWS[finalUser.role] || []
 
-                setAllowedViews(configuredViews)
+                setRealAllowedViews(configuredViews)
 
                 const { data: roleCfg } = await supabase
                     .from('sys_roles_config')
@@ -217,10 +275,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 }
                 return true
             } else {
-                setSysRole(null)
+                setRealRole(null)
                 setSysUserId(null)
-                setFullName(null)
-                setAllowedViews(null)
+                setRealFullName(null)
+                setRealAllowedViews(null)
+                setPreviewProfileState(null)
                 setPermissions({ can_approve_reports: false, can_edit_approved: false })
                 return false
             }
@@ -290,11 +349,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 }
             } else {
                 setUser(null)
-                setSysRole(null)
+                setRealRole(null)
                 setSysUserId(null)
-                setFullName(null)
+                setRealFullName(null)
                 setPermissions(null)
-                setAllowedViews(null)
+                setRealAllowedViews(null)
+                setPreviewProfileState(null)
             }
             setLoading(false)
         })
@@ -419,19 +479,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch {}
         setUser(null)
         setSession(null)
-        setSysRole(null)
+        setRealRole(null)
         setSysUserId(null)
-        setFullName(null)
-        setAllowedViews(null)
+        setRealFullName(null)
+        setRealAllowedViews(null)
+        setPreviewProfileState(null)
         if (typeof window !== 'undefined') {
             window.location.href = '/login'
         }
     }
 
-    // Deshabilitado por seguridad: no se permite cambio de rol ni acceso demo sin autenticación real
-    const loginAsDemo = async () => {
-        console.warn('Acceso demo deshabilitado por políticas de seguridad corporativa.')
+    // Deshabilitado por seguridad para usuarios no autenticados; solo SUPER_ADMIN puede usar setPreviewProfile
+    const loginAsDemo = async (role?: string) => {
+        if (realRole === 'SUPER_ADMIN' && role) {
+            if (role === 'SUPER_ADMIN') {
+                setPreviewProfile(null)
+            } else {
+                setPreviewProfile({
+                    role,
+                    label: role.replace(/_/g, ' '),
+                    views: DEFAULT_ROLE_VIEWS[role] || [],
+                })
+            }
+        }
     }
+
+    const isRealSuperAdmin = realRole === 'SUPER_ADMIN'
+    const sysRole = isRealSuperAdmin && previewProfile ? previewProfile.role : realRole
+    const allowedViews =
+        isRealSuperAdmin && previewProfile
+            ? Array.isArray(previewProfile.views)
+                ? previewProfile.views
+                : DEFAULT_ROLE_VIEWS[previewProfile.role] || []
+            : realAllowedViews
+    const fullName =
+        isRealSuperAdmin && previewProfile
+            ? `${previewProfile.label} (Vista SuperAdmin)`
+            : realFullName
 
     const isViewAllowed = useCallback(
         (path: string) => checkPathAllowed(path, sysRole, allowedViews),
@@ -449,6 +533,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 user,
                 session,
                 sysRole,
+                realRole,
+                isRealSuperAdmin,
+                previewProfile,
+                setPreviewProfile,
                 sysUserId,
                 fullName,
                 permissions,

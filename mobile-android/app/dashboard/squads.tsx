@@ -112,57 +112,68 @@ export default function MobileSquadsScreen() {
         }
     }
 
-    const getSquadSupervisorInfo = useCallback(
-        (squad: any, metaMap = supervisorsMeta, empList = allEmployees, usersList = sysUsers) => {
-            const meta = metaMap[squad?.id]
-            const supEmp =
-                empList.find((e) => e.id === (squad?.supervisor_id || meta?.supervisor_employee_id)) || null
-            const empName = supEmp ? supEmp.fullName : meta?.supervisor_employee_name || ''
-            const userMatch =
-                usersList.find((u) => u.id === meta?.supervisor_user_id) ||
-                usersList.find(
-                    (u) =>
-                        meta?.supervisor_user_email &&
-                        (u.email || '').toLowerCase() === meta.supervisor_user_email.toLowerCase()
-                ) ||
-                usersList.find((u) => {
-                    const cleanSup = (empName || '').toLowerCase().trim()
-                    const cleanUser = (u.full_name || '').toLowerCase().trim()
-                    return cleanSup && cleanUser && (cleanUser.includes(cleanSup) || cleanSup.includes(cleanUser))
-                }) ||
-                null
-            return {
-                employeeId: supEmp?.id || squad?.supervisor_id || meta?.supervisor_employee_id || null,
-                employeeName: empName || userMatch?.full_name || 'Sin Supervisor Asignado',
-                userId: userMatch?.id || meta?.supervisor_user_id || null,
-                userEmail: userMatch?.email || meta?.supervisor_user_email || null,
-            }
-        },
-        [supervisorsMeta, allEmployees, sysUsers]
-    )
+    const resolveSupervisorFromData = (
+        squad: any,
+        metaMap: Record<string, SquadSupervisorMeta>,
+        empList: any[],
+        usersList: any[]
+    ) => {
+        const meta = metaMap[squad?.id]
+        const joinedSup = Array.isArray(squad?.rh_employees)
+            ? squad?.rh_employees[0]
+            : squad?.rh_employees
+        const joinedSupName = joinedSup
+            ? `${joinedSup.first_name || ''} ${joinedSup.last_name || ''}`.trim()
+            : ''
+        const supEmp =
+            empList.find((e) => e.id === (squad?.supervisor_id || meta?.supervisor_employee_id)) || null
+        const empName = supEmp ? supEmp.fullName : joinedSupName || meta?.supervisor_employee_name || ''
+        const userMatch =
+            usersList.find((u) => u.id === meta?.supervisor_user_id) ||
+            usersList.find(
+                (u) =>
+                    meta?.supervisor_user_email &&
+                    (u.email || '').toLowerCase() === meta.supervisor_user_email.toLowerCase()
+            ) ||
+            usersList.find((u) => {
+                const cleanSup = (empName || '').toLowerCase().trim()
+                const cleanUser = (u.full_name || '').toLowerCase().trim()
+                return cleanSup && cleanUser && (cleanUser.includes(cleanSup) || cleanSup.includes(cleanUser))
+            }) ||
+            null
+        return {
+            employeeId: supEmp?.id || squad?.supervisor_id || meta?.supervisor_employee_id || null,
+            employeeName: empName || userMatch?.full_name || 'Sin Supervisor Asignado',
+            userId: userMatch?.id || meta?.supervisor_user_id || null,
+            userEmail: userMatch?.email || meta?.supervisor_user_email || null,
+        }
+    }
 
-    const loadSquadsData = useCallback(async () => {
-        setLoading(true)
+    const getSquadSupervisorInfo = (squad: any) =>
+        resolveSupervisorFromData(squad, supervisorsMeta, allEmployees, sysUsers)
+
+    const loadSquadsData = useCallback(async (silent = false) => {
+        if (!silent) setLoading(true)
         try {
             const [
-                { data: sqData },
-                { data: memData },
-                { data: empData },
-                { data: histData },
-                { data: usersData },
+                sqRes,
+                memRes,
+                empRes,
+                histRes,
+                usersRes,
                 supMeta,
             ] = await Promise.all([
                 supabase
                     .from('cat_cuadrillas')
-                    .select('id, nombre, codigo, activo, supervisor_id, cat_turnos(nombre, codigo), mine_sites(nombre_mina)')
+                    .select('*, cat_turnos(nombre, codigo), mine_sites(nombre_mina), rh_employees(id, first_name, last_name, employee_code)')
                     .eq('activo', true)
                     .order('nombre'),
                 supabase
                     .from('cat_cuadrillas_miembros')
-                    .select('id, cuadrilla_id, empleado_id, rol_operativo_id, activo'),
+                    .select('*'),
                 supabase
                     .from('rh_employees')
-                    .select('id, employee_code, first_name, last_name, status, cat_puestos(nombre), cat_roles_operativos(nombre)')
+                    .select('*, cat_puestos(nombre), cat_roles_operativos(nombre)')
                     .order('first_name'),
                 supabase
                     .from('sys_config')
@@ -177,10 +188,32 @@ export default function MobileSquadsScreen() {
                 getSquadSupervisorsMeta(),
             ])
 
+            let sqData = sqRes.data
+            if (!sqData) {
+                const fallbackSq = await supabase
+                    .from('cat_cuadrillas')
+                    .select('*')
+                    .eq('activo', true)
+                    .order('nombre')
+                sqData = fallbackSq.data || []
+            }
+
+            let memData = memRes.data
+            if (!memData) {
+                const fallbackMem = await supabase.from('cat_cuadrillas_miembros').select('*')
+                memData = fallbackMem.data || []
+            }
+
+            const empData = empRes.data || []
+            const histData = histRes.data
+            const usersData = usersRes.data || []
+
             const activeSquads = sqData || []
             setCuadrillas(activeSquads)
-            if (activeSquads.length > 0 && !selectedSquadId) {
-                setSelectedSquadId(activeSquads[0].id)
+            if (activeSquads.length > 0) {
+                setSelectedSquadId((prev) =>
+                    prev && activeSquads.some((s: any) => s.id === prev) ? prev : activeSquads[0].id
+                )
             }
 
             const hMap =
@@ -228,7 +261,7 @@ export default function MobileSquadsScreen() {
                 if (emp && sqObj && grouped[m.cuadrilla_id] && !assignedSet.has(m.empleado_id)) {
                     assignedSet.add(m.empleado_id)
                     grouped[m.cuadrilla_id].push(emp)
-                    const supInfo = getSquadSupervisorInfo(sqObj, supMeta || {}, activeEmps, usersData || [])
+                    const supInfo = resolveSupervisorFromData(sqObj, supMeta || {}, activeEmps, usersData || [])
                     wSquadMap[emp.id] = {
                         squadId: sqObj.id,
                         squadName: sqObj.nombre,
@@ -252,10 +285,10 @@ export default function MobileSquadsScreen() {
         } finally {
             setLoading(false)
         }
-    }, [selectedSquadId, getSquadSupervisorInfo])
+    }, [])
 
     useEffect(() => {
-        loadSquadsData()
+        loadSquadsData(false)
     }, [loadSquadsData])
 
     const executeMoveWorker = (worker: any, currentSquadObj: any, targetSquadId: string | 'BENCH') => {
@@ -285,7 +318,6 @@ export default function MobileSquadsScreen() {
                         {
                             cuadrilla_id: targetSquadId,
                             empleado_id: worker.id,
-                            activo: true,
                         },
                     ])
                 }
@@ -338,7 +370,7 @@ export default function MobileSquadsScreen() {
 
                 setSelectedWorker(null)
                 setTransferringTo(null)
-                await loadSquadsData()
+                await loadSquadsData(true)
             } catch (err: any) {
                 setTransferringTo(null)
                 Alert.alert('Error', err?.message || 'No se pudo completar el movimiento.')
@@ -404,7 +436,7 @@ export default function MobileSquadsScreen() {
                 supervisor_user_name: supUser?.full_name || null,
             })
             setSupervisorModalOpen(false)
-            await loadSquadsData()
+            await loadSquadsData(true)
         } catch (err: any) {
             Alert.alert('Error', err?.message || 'No se pudo asignar el supervisor titular.')
         } finally {

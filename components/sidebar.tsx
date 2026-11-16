@@ -25,6 +25,8 @@ import {
     PlusCircle,
     ShieldCheck,
     Eye,
+    Smartphone,
+    RotateCcw,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
@@ -100,7 +102,16 @@ export default function Sidebar() {
     const [isDesktopOpen, setIsDesktopOpen] = useState(true)
     const [isMobileOpen, setIsMobileOpen] = useState(false)
     const pathname = usePathname()
-    const { signOut, sysRole, user, fullName, isViewAllowed } = useAuth()
+    const {
+        signOut,
+        sysRole,
+        isRealSuperAdmin,
+        previewProfile,
+        setPreviewProfile,
+        user,
+        fullName,
+        isViewAllowed,
+    } = useAuth()
 
     useEffect(() => {
         setIsMobileOpen(false)
@@ -136,21 +147,45 @@ export default function Sidebar() {
                 )}
             </div>
 
-            {/* Credencial Verificada (Solo Lectura — Sin Selector Demo) */}
+            {/* Credencial Verificada + Botón Directo Modo APK (Celular) */}
             {expanded && (
-                <div className="mx-3 mt-3 p-3 rounded-xl bg-slate-950 border border-emerald-500/30 shadow-inner">
+                <div className="mx-3 mt-3 p-3 rounded-xl bg-slate-950 border border-emerald-500/30 shadow-inner space-y-2">
                     <div className="flex items-center justify-between">
                         <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-emerald-400">
-                            <ShieldCheck size={12} /> Credencial Verificada
+                            <ShieldCheck size={12} /> {previewProfile ? 'Vista Simulada' : 'Credencial Verificada'}
                         </span>
                         <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[9px] font-black uppercase">
                             {sysRole || 'AUTORIZADO'}
                         </span>
                     </div>
-                    <p className="text-xs font-bold text-white truncate mt-1">
-                        {fullName || user?.email}
-                    </p>
-                    <p className="text-[10px] text-slate-400 truncate">{user?.email}</p>
+                    <div>
+                        <p className="text-xs font-bold text-white truncate">
+                            {fullName || user?.email}
+                        </p>
+                        <p className="text-[10px] text-slate-400 truncate">
+                            {previewProfile?.userEmail || user?.email}
+                        </p>
+                    </div>
+                    <div className="flex gap-1.5 pt-1">
+                        <Link
+                            href="/mobile"
+                            className="flex-1 py-1.5 px-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[10px] font-black flex items-center justify-center gap-1 transition-colors"
+                        >
+                            <Smartphone size={12} />
+                            Modo APK (Celular)
+                        </Link>
+                        {isRealSuperAdmin && previewProfile && (
+                            <button
+                                type="button"
+                                onClick={() => setPreviewProfile(null)}
+                                title="Volver a vista original de Super Admin"
+                                className="py-1.5 px-2 rounded-lg bg-amber-500 text-slate-950 text-[10px] font-black flex items-center justify-center gap-1 cursor-pointer"
+                            >
+                                <RotateCcw size={11} />
+                                Admin
+                            </button>
+                        )}
+                    </div>
                 </div>
             )}
 

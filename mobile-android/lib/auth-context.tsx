@@ -125,6 +125,7 @@ export const DEFAULT_ROLE_VIEWS: Record<string, string[]> = {
     '/dashboard/chat',
   ],
   JEFE_PLANEACION: [
+    '/dashboard',
     '/dashboard/semana',
     '/dashboard/catalogos/ubicaciones',
     '/dashboard/catalogos/productos-mina',
@@ -132,6 +133,7 @@ export const DEFAULT_ROLE_VIEWS: Record<string, string[]> = {
     '/dashboard/chat',
   ],
   SUPERVISOR: [
+    '/dashboard',
     '/dashboard/catalogos/cuadrillas',
     '/dashboard/operacion/reportes-diarios',
     '/dashboard/chat',
@@ -242,6 +244,9 @@ export interface MobileUser {
 interface AuthContextType {
   user: MobileUser | null;
   sysRole: MobileRole;
+  isRealSuperAdmin: boolean;
+  previewRole: MobileRole | null;
+  setPreviewRole: (role: MobileRole | null) => void;
   roleMeta: RoleMetadata;
   loading: boolean;
   theme: 'light' | 'dark';
@@ -268,6 +273,9 @@ const THEME_STORAGE_KEY = 'raya_mobile_theme_v1';
 const AuthContext = createContext<AuthContextType>({
   user: null,
   sysRole: 'SUPERVISOR',
+  isRealSuperAdmin: false,
+  previewRole: null,
+  setPreviewRole: () => {},
   roleMeta: ROLE_META.SUPERVISOR,
   loading: true,
   theme: 'light',
@@ -287,6 +295,7 @@ const AuthContext = createContext<AuthContextType>({
 
 export const MobileAuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<MobileUser | null>(null);
+  const [previewRole, setPreviewRoleState] = useState<MobileRole | null>(null);
   const [loading, setLoading] = useState(true);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
@@ -453,6 +462,7 @@ export const MobileAuthProvider = ({ children }: { children: React.ReactNode }) 
 
   const signOut = async () => {
     setUser(null);
+    setPreviewRoleState(null);
     await AsyncStorage.removeItem(STORAGE_KEY);
     await AsyncStorage.removeItem('raya_mobile_auth_user_v2');
   };
@@ -463,22 +473,38 @@ export const MobileAuthProvider = ({ children }: { children: React.ReactNode }) 
     await AsyncStorage.setItem(THEME_STORAGE_KEY, next);
   };
 
-  const sysRole: MobileRole = user?.role || 'SUPERVISOR';
+  const isRealSuperAdmin = user?.role === 'SUPER_ADMIN';
+  const setPreviewRole = useCallback(
+    (role: MobileRole | null) => {
+      if (!isRealSuperAdmin) {
+        setPreviewRoleState(null);
+        return;
+      }
+      setPreviewRoleState(role === 'SUPER_ADMIN' ? null : role);
+    },
+    [isRealSuperAdmin]
+  );
+
+  const sysRole: MobileRole =
+    isRealSuperAdmin && previewRole ? previewRole : user?.role || 'SUPERVISOR';
   const roleMeta = ROLE_META[sysRole] || ROLE_META.SUPERVISOR;
-  const allowedViews = user?.views_json || [];
+  const allowedViews =
+    isRealSuperAdmin && previewRole
+      ? DEFAULT_ROLE_VIEWS[previewRole] || DEFAULT_ROLE_VIEWS.SUPERVISOR
+      : user?.views_json || [];
 
   const isApkRouteAllowed = useCallback(
     (apkHref: string): boolean => {
       if (!user) return false;
-      return checkApkRouteAllowed(apkHref, user.role, user.views_json);
+      return checkApkRouteAllowed(apkHref, sysRole, allowedViews);
     },
-    [user]
+    [user, sysRole, allowedViews]
   );
 
   const getFirstAllowedApkRoute = useCallback((): string => {
     if (!user) return '/login';
-    return resolveFirstAllowedApkRoute(user.role, user.views_json);
-  }, [user]);
+    return resolveFirstAllowedApkRoute(sysRole, allowedViews);
+  }, [user, sysRole, allowedViews]);
 
   const isJefaturaOrAbove = [
     'SUPER_ADMIN',
@@ -519,6 +545,9 @@ export const MobileAuthProvider = ({ children }: { children: React.ReactNode }) 
       value={{
         user,
         sysRole,
+        isRealSuperAdmin,
+        previewRole,
+        setPreviewRole,
         roleMeta,
         loading,
         theme,

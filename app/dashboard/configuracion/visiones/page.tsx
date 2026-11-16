@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { DEFAULT_ROLE_VIEWS, useAuth } from '@/lib/auth-context'
+import { DEFAULT_ROLE_VIEWS, resolveFirstAllowedPath, useAuth } from '@/lib/auth-context'
 import { ALL_SYSTEM_MODULES } from '@/lib/system-modules'
 import {
     Eye, Save, Shield, CheckSquare, Square, Users, CheckCircle2,
@@ -76,7 +77,14 @@ const ROLE_PRESETS: Array<{ id: string; label: string; paths: string[] }> = [
 ]
 
 export default function ControlVisionesPage() {
-    const { refreshUserConfig, user: currentAuthUser, sysRole: currentRole } = useAuth()
+    const router = useRouter()
+    const {
+        refreshUserConfig,
+        user: currentAuthUser,
+        sysRole: currentRole,
+        isRealSuperAdmin,
+        setPreviewProfile,
+    } = useAuth()
     const [users, setUsers] = useState<SysUserRow[]>([])
     const [selectedUserId, setSelectedUserId] = useState<string>('')
     const [allowedPaths, setAllowedPaths] = useState<string[]>([])
@@ -251,7 +259,7 @@ export default function ControlVisionesPage() {
         return tabs
     }, [allowedPaths, isSuperAdminTarget])
 
-    if (currentRole && currentRole !== 'SUPER_ADMIN') {
+    if (currentRole && currentRole !== 'SUPER_ADMIN' && !isRealSuperAdmin) {
         return (
             <div className="max-w-xl mx-auto mt-12 p-8 bg-slate-900 border border-rose-500/30 rounded-2xl text-center space-y-3">
                 <Lock className="w-10 h-10 text-rose-400 mx-auto" />
@@ -415,18 +423,61 @@ export default function ControlVisionesPage() {
                                 </div>
                             )}
 
-                            {/* Vista Previa en Vivo (Web + APK) */}
+                            {/* Vista Previa en Vivo (Web + APK) con Botones Interactivos de Simulación */}
                             <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                     <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-white">
                                         <Smartphone className="w-4 h-4 text-emerald-400" />
                                         Vista Previa en APK Móvil ({apkPreviewTabs.length} pantallas visibles):
                                     </div>
-                                    <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                                        <Monitor className="w-3.5 h-3.5 text-sky-400" />
-                                        <span>
-                                            Web: {isSuperAdminTarget ? ALL_SYSTEM_MODULES.length : allowedPaths.length} módulos activos
-                                        </span>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (selectedUser.role === 'SUPER_ADMIN') {
+                                                    setPreviewProfile(null)
+                                                    router.push('/dashboard')
+                                                } else {
+                                                    setPreviewProfile({
+                                                        role: selectedUser.role,
+                                                        label: selectedUser.full_name,
+                                                        userId: selectedUser.id,
+                                                        userEmail: selectedUser.email,
+                                                        views: allowedPaths,
+                                                    })
+                                                    const first = resolveFirstAllowedPath(selectedUser.role, allowedPaths)
+                                                    router.push(first)
+                                                }
+                                            }}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 text-xs font-black transition-all cursor-pointer"
+                                        >
+                                            <Monitor className="w-3.5 h-3.5 text-sky-400" />
+                                            <span>
+                                                Probar Modo Web ({isSuperAdminTarget ? ALL_SYSTEM_MODULES.length : allowedPaths.length} módulos)
+                                            </span>
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (selectedUser.role === 'SUPER_ADMIN') {
+                                                    setPreviewProfile(null)
+                                                } else {
+                                                    setPreviewProfile({
+                                                        role: selectedUser.role,
+                                                        label: selectedUser.full_name,
+                                                        userId: selectedUser.id,
+                                                        userEmail: selectedUser.email,
+                                                        views: allowedPaths,
+                                                    })
+                                                }
+                                                router.push('/mobile')
+                                            }}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black transition-all shadow-md cursor-pointer"
+                                        >
+                                            <Smartphone className="w-3.5 h-3.5" />
+                                            <span>Probar Modo APK (Celular)</span>
+                                        </button>
                                     </div>
                                 </div>
                                 <div className="flex flex-wrap gap-1.5">
