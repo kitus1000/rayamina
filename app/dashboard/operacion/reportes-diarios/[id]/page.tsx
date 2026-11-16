@@ -322,7 +322,7 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
                                     <div className="flex justify-between items-start mb-1">
                                         <div className="font-bold text-slate-200">{att.rh_employees.first_name} {att.rh_employees.last_name}</div>
                                         <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${att.cat_asistencias.color.replace('bg-', 'text-').replace('500', '400')}`}>
-                                            {att.cat_asistencias.nombre}
+                                            {att.cat_asistencias.codigo} — {att.cat_asistencias.nombre}
                                         </span>
                                     </div>
                                     <div className="text-[11px] text-slate-500 flex flex-col gap-1">

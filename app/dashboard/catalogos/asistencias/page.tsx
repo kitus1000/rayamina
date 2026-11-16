@@ -44,6 +44,7 @@ export default function AsistenciasCatalog() {
         const { data, error } = await supabase
             .from('cat_asistencias')
             .select('*')
+            .order('orden', { ascending: true })
             .order('codigo')
 
         if (error) {

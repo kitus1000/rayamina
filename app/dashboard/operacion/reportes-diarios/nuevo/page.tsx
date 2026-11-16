@@ -26,6 +26,7 @@ type AttendanceItem = {
     asistencia_id: string
     estado_codigo: string // Para lógica UI (ej. pintar de rojo si es falta)
     estado_color: string
+    horas_extra: number // H.E. para Excel oficial (Dobles/Triples)
     observacion: string
 }
 
@@ -115,11 +116,9 @@ export default function DailyReportsPage() {
                 if (dMinas.length > 0) setSelectedMina(dMinas[0].id)
             }
 
-            // 3.5 Asistencias Catalog
-            const { data: dAsistencias } = await supabase.from('cat_asistencias').select('*').eq('activo', true)
+            // 3.5 Asistencias Catalog (18 Conceptos Oficiales de Nómina)
+            const { data: dAsistencias } = await supabase.from('cat_asistencias').select('*').eq('activo', true).order('orden')
             if (dAsistencias) {
-                // Find 'ASISTENCIA' code default
-                const defaultAsist = dAsistencias.find(a => a.codigo === 'ASISTENCIA')
                 setAsistenciasCatalog(dAsistencias)
             }
 
@@ -195,7 +194,7 @@ export default function DailyReportsPage() {
             .eq('cuadrilla_id', selectedCuadrilla)
 
         if (data && asistenciasCatalog.length > 0) {
-            const defaultAsist = asistenciasCatalog.find(a => a.codigo === 'ASISTENCIA') || asistenciasCatalog[0]
+            const defaultAsist = asistenciasCatalog.find(a => a.codigo === 'X' || a.codigo === 'ASISTENCIA') || asistenciasCatalog[0]
 
             const list: AttendanceItem[] = data.map((item: any) => ({
                 empleado_id: item.empleado_id,
@@ -207,6 +206,7 @@ export default function DailyReportsPage() {
                 asistencia_id: defaultAsist.id,
                 estado_codigo: defaultAsist.codigo,
                 estado_color: defaultAsist.color,
+                horas_extra: ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(defaultAsist.codigo) ? 4 : 0,
                 observacion: ''
             }))
             list.sort((a, b) => a.rol_nombre_default.localeCompare(b.rol_nombre_default))
@@ -231,9 +231,9 @@ export default function DailyReportsPage() {
         }
 
         if (currentStep === 'ATTENDANCE') {
-            const hasAttendance = attendanceList.some(a => a.estado_codigo === 'ASISTENCIA')
+            const hasAttendance = attendanceList.some(a => ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(a.estado_codigo))
             if (!hasAttendance) {
-                if (!confirm('¿Nadie asistió? Se marcará el reporte como improductivo.')) return
+                if (!confirm('¿Nadie asistió a laborar? Se marcará el reporte sin personal en frente.')) return
             }
             setCurrentStep('ACTIVITIES')
             return
@@ -259,7 +259,7 @@ export default function DailyReportsPage() {
         setCurrentActivity({
             temp_id: Math.random().toString(36).substr(2, 9),
             variables: {},
-            participantes: attendanceList.filter(a => a.estado_codigo === 'ASISTENCIA').map(a => a.empleado_id)
+            participantes: attendanceList.filter(a => ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(a.estado_codigo)).map(a => a.empleado_id)
         })
         setSelectedProductVariables([])
         setIsModalOpen(true)
@@ -321,13 +321,17 @@ export default function DailyReportsPage() {
             if (errReport) throw errReport
 
             // 2. ATTENDANCE
-            const attendancePayload = attendanceList.map(a => ({
-                report_id: report.id,
-                empleado_id: a.empleado_id,
-                asistencia_tipo_id: a.asistencia_id,
-                rol_asignado_id: a.rol_dia_id,
-                observaciones: a.observacion
-            }))
+            const attendancePayload = attendanceList.map(a => {
+                const working = ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(a.estado_codigo)
+                return {
+                    report_id: report.id,
+                    empleado_id: a.empleado_id,
+                    asistencia_tipo_id: a.asistencia_id,
+                    rol_asignado_id: a.rol_dia_id,
+                    horas_trabajadas: working ? 8 + Math.max(0, Number(a.horas_extra) || 0) : 0,
+                    observaciones: a.observacion
+                }
+            })
             const { error: errAtt } = await supabase.from('ops_daily_attendance').insert(attendancePayload)
             if (errAtt) throw errAtt
 
@@ -640,7 +644,7 @@ export default function DailyReportsPage() {
                             </h3>
                             <button
                                 onClick={() => {
-                                    const defaultAsist = asistenciasCatalog.find(a => a.codigo === 'ASISTENCIA') || asistenciasCatalog[0];
+                                    const defaultAsist = asistenciasCatalog.find(a => a.codigo === 'X' || a.codigo === 'ASISTENCIA') || asistenciasCatalog[0];
                                     if (defaultAsist) {
                                         const allRefreshed = attendanceList.map((a: any) => ({
                                             ...a,
@@ -653,7 +657,7 @@ export default function DailyReportsPage() {
                                 }}
                                 className="text-xs text-amber-500 hover:text-amber-400 underline"
                             >
-                                Marcar todos Asistencia
+                                Marcar todos X (Asistencia)
                             </button>
                         </div>
                         <div className="overflow-x-auto">
@@ -661,7 +665,8 @@ export default function DailyReportsPage() {
                                 <thead>
                                     <tr className="border-b border-slate-800 text-xs text-slate-400 uppercase">
                                         <th className="p-3">Empleado</th>
-                                        <th className="p-3">Estado</th>
+                                        <th className="p-3">Incidencia Oficial (Catálogo)</th>
+                                        <th className="p-3 w-20 text-center">H.E. (Hrs)</th>
                                         <th className="p-3">Rol del Día</th>
                                         <th className="p-3">Observaciones</th>
                                     </tr>
@@ -679,27 +684,41 @@ export default function DailyReportsPage() {
                                                     onChange={e => {
                                                         const asis = asistenciasCatalog.find(a => a.id === e.target.value)
                                                         if (asis) {
+                                                            const working = ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(asis.codigo)
                                                             updateAttendance(idx, 'asistencia_id', asis.id)
                                                             updateAttendance(idx, 'estado_codigo', asis.codigo)
                                                             updateAttendance(idx, 'estado_color', asis.color)
+                                                            updateAttendance(idx, 'horas_extra', working ? (item.horas_extra || 4) : 0)
                                                         }
                                                     }}
-                                                    className={`rounded px-2 py-1 text-xs border bg-slate-800/50 border-slate-700 text-white
+                                                    className={`rounded px-2 py-1 text-xs border bg-slate-800/50 border-slate-700 text-white font-bold
                                                         ${item.estado_color.replace('bg-', 'text-').replace('500', '400')}
                                                         ${item.estado_color.replace('bg-', 'border-').replace('500', '800/50')}
                                                     `}
                                                 >
                                                     {asistenciasCatalog.map(a => (
-                                                        <option key={a.id} value={a.id}>{a.nombre}</option>
+                                                        <option key={a.id} value={a.id}>{a.codigo} — {a.nombre}</option>
                                                     ))}
                                                 </select>
+                                            </td>
+                                            <td className="p-3 text-center">
+                                                <input
+                                                    type="number"
+                                                    min={0}
+                                                    max={16}
+                                                    step={1}
+                                                    disabled={!['X', 'ASISTENCIA', 'DX', 'DOX'].includes(item.estado_codigo)}
+                                                    value={item.horas_extra ?? 0}
+                                                    onChange={e => updateAttendance(idx, 'horas_extra', parseFloat(e.target.value) || 0)}
+                                                    className="w-16 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-center text-cyan-300 font-bold text-xs disabled:opacity-40"
+                                                />
                                             </td>
                                             <td className="p-3">
                                                 <select
                                                     value={item.rol_dia_id || ''}
                                                     onChange={e => updateAttendance(idx, 'rol_dia_id', e.target.value)}
                                                     className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-300 text-xs"
-                                                    disabled={item.estado_codigo !== 'ASISTENCIA'}
+                                                    disabled={!['X', 'ASISTENCIA', 'DX', 'DOX'].includes(item.estado_codigo)}
                                                 >
                                                     {rolesOperativos.map(r => (
                                                         <option key={r.id} value={r.id}>{r.nombre}</option>
@@ -900,7 +919,7 @@ export default function DailyReportsPage() {
                                                 <div>
                                                     <label className="block text-xs text-slate-400 mb-2">Personal Involucrado (Check)</label>
                                                     <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-2">
-                                                        {attendanceList.filter(a => a.estado_codigo === 'ASISTENCIA').map(att => (
+                                                        {attendanceList.filter(a => ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(a.estado_codigo)).map(att => (
                                                             <label key={att.empleado_id} className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-all ${currentActivity.participantes?.includes(att.empleado_id)
                                                                 ? 'bg-amber-900/20 border-amber-500/50'
                                                                 : 'bg-slate-950 border-slate-800 hover:border-slate-600'
@@ -964,12 +983,12 @@ export default function DailyReportsPage() {
                                         <span className="text-white font-bold">{attendanceList.length}</span>
                                     </div>
                                     <div className="flex justify-between">
-                                        <span className="text-emerald-400">Asistencia:</span>
-                                        <span className="text-emerald-400 font-bold">{attendanceList.filter(a => a.estado_codigo === 'ASISTENCIA').length}</span>
+                                        <span className="text-emerald-400">Asistencia (X / DX / DOX):</span>
+                                        <span className="text-emerald-400 font-bold">{attendanceList.filter(a => ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(a.estado_codigo)).length}</span>
                                     </div>
                                     <div className="flex justify-between">
                                         <span className="text-red-400">Faltas/Incidencias:</span>
-                                        <span className="text-red-400 font-bold">{attendanceList.filter(a => a.estado_codigo !== 'ASISTENCIA').length}</span>
+                                        <span className="text-red-400 font-bold">{attendanceList.filter(a => !['X', 'ASISTENCIA', 'DX', 'DOX'].includes(a.estado_codigo)).length}</span>
                                     </div>
                                 </div>
                             </div>

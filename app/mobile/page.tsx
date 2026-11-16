@@ -453,7 +453,7 @@ export default function AndroidMobileAppPage() {
                 supabase.from('mine_locations').select('*').eq('activo', true).order('nombre'),
                 supabase.from('cat_productos_mina').select('*').eq('activo', true).order('nombre'),
                 supabase.from('ops_equipment').select('*').order('clave'),
-                supabase.from('cat_asistencias').select('*').eq('activo', true),
+                supabase.from('cat_asistencias').select('*').eq('activo', true).order('orden'),
                 supabase.from('sys_config').select('value_json').eq('key_name', SQUAD_HISTORY_KEY).maybeSingle(),
                 supabase.from('sys_config').select('value_json').eq('key_name', BLOG_STORE_KEY).maybeSingle(),
                 supabase.from('sys_config').select('value_json').eq('key_name', SEC_STORE_KEY).maybeSingle(),
@@ -596,7 +596,7 @@ export default function AndroidMobileAppPage() {
         if (!repCuadrillaId || asistenciasCat.length === 0) return
         const members = membersBySquad[repCuadrillaId] || []
         const defAsist =
-            asistenciasCat.find((a) => a.codigo === 'ASISTENCIA' || a.codigo === 'A') ||
+            asistenciasCat.find((a) => a.codigo === 'X' || a.codigo === 'ASISTENCIA' || a.codigo === 'A') ||
             asistenciasCat[0]
         if (!defAsist) return
 
@@ -609,6 +609,7 @@ export default function AndroidMobileAppPage() {
                 rol_id: m.role_id || m.rol_operativo_default_id || null,
                 asistencia_id: defAsist.id,
                 codigo: defAsist.codigo,
+                horas_extra: ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(defAsist.codigo) ? 4 : 0,
             }))
         )
     }, [repCuadrillaId, membersBySquad, asistenciasCat])
@@ -762,23 +763,26 @@ export default function AndroidMobileAppPage() {
             const reportId = repRow.id
 
             if (repAttendance.length > 0) {
-                const attPayload = repAttendance.map((a) => ({
-                    report_id: reportId,
-                    empleado_id: a.empleado_id,
-                    asistencia_tipo_id: a.asistencia_id,
-                    asistencia_id: a.asistencia_id,
-                    rol_asignado_id: a.rol_id,
-                    rol_dia_id: a.rol_id,
-                    horas_trabajadas: 8,
-                    observaciones: '',
-                    observacion: '',
-                }))
+                const attPayload = repAttendance.map((a) => {
+                    const working = ['X', 'ASISTENCIA', 'A', 'DX', 'DOX'].includes(a.codigo)
+                    return {
+                        report_id: reportId,
+                        empleado_id: a.empleado_id,
+                        asistencia_tipo_id: a.asistencia_id,
+                        asistencia_id: a.asistencia_id,
+                        rol_asignado_id: a.rol_id,
+                        rol_dia_id: a.rol_id,
+                        horas_trabajadas: working ? 8 + Math.max(0, Number(a.horas_extra) || 0) : 0,
+                        observaciones: '',
+                        observacion: '',
+                    }
+                })
                 const { error: attErr } = await supabase.from('ops_daily_attendance').insert(attPayload)
                 if (attErr) throw attErr
             }
 
             const presentEmpIds = repAttendance
-                .filter((a) => a.codigo === 'ASISTENCIA' || a.codigo === 'A')
+                .filter((a) => ['X', 'ASISTENCIA', 'A', 'DX', 'DOX'].includes(a.codigo))
                 .map((a) => a.empleado_id)
 
             for (const act of repActivities) {
@@ -1917,42 +1921,96 @@ export default function AndroidMobileAppPage() {
                                 {wizardStep === 2 && (
                                     <div className="space-y-3">
                                         <div className="text-xs font-black text-amber-500 uppercase">
-                                            Paso 2: Pase de Lista ({repAttendance.length} mineros)
+                                            Paso 2: Pase de Lista e Incidencias Oficiales ({repAttendance.length} mineros)
                                         </div>
                                         <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
                                             {repAttendance.map((att, idx) => (
                                                 <div
                                                     key={att.empleado_id}
-                                                    className="bg-slate-950 border border-slate-800 rounded-xl p-2.5"
+                                                    className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 space-y-2"
                                                 >
-                                                    <div className="text-xs font-black text-white">
-                                                        {att.nombre}
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <div>
+                                                            <div className="text-xs font-black text-white">
+                                                                {att.nombre}
+                                                            </div>
+                                                            <div className="text-[10px] text-slate-400">
+                                                                {att.puesto}
+                                                            </div>
+                                                        </div>
+                                                        <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[10px] font-black">
+                                                            {att.codigo}
+                                                        </span>
                                                     </div>
-                                                    <div className="text-[10px] text-slate-400 mb-2">
-                                                        {att.puesto}
-                                                    </div>
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {asistenciasCat.map((a) => {
-                                                            const active = att.asistencia_id === a.id
-                                                            return (
+                                                    <select
+                                                        value={att.asistencia_id}
+                                                        onChange={(e) => {
+                                                            const found = asistenciasCat.find((a) => a.id === e.target.value)
+                                                            if (!found) return
+                                                            const working = ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(found.codigo)
+                                                            const copy = [...repAttendance]
+                                                            copy[idx].asistencia_id = found.id
+                                                            copy[idx].codigo = found.codigo
+                                                            copy[idx].horas_extra = working ? (copy[idx].horas_extra || 4) : 0
+                                                            setRepAttendance(copy)
+                                                        }}
+                                                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-black text-white outline-none"
+                                                    >
+                                                        {asistenciasCat.map((a) => (
+                                                            <option key={a.id} value={a.id}>
+                                                                {a.codigo} — {a.nombre}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <div className="flex items-center justify-between gap-2 bg-slate-900/70 px-2.5 py-1.5 rounded-lg border border-slate-800">
+                                                        <span className="text-[10px] font-bold text-slate-400">H.E. (Horas Extra):</span>
+                                                        <div className="flex items-center gap-1">
+                                                            {[0, 2, 4, 5].map((hv) => (
                                                                 <button
-                                                                    key={a.id}
+                                                                    key={hv}
+                                                                    disabled={!['X', 'ASISTENCIA', 'DX', 'DOX'].includes(att.codigo)}
                                                                     onClick={() => {
                                                                         const copy = [...repAttendance]
-                                                                        copy[idx].asistencia_id = a.id
-                                                                        copy[idx].codigo = a.codigo
+                                                                        copy[idx].horas_extra = hv
                                                                         setRepAttendance(copy)
                                                                     }}
-                                                                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black border ${
-                                                                        active
-                                                                            ? 'bg-emerald-500 text-slate-950 border-emerald-400'
-                                                                            : 'bg-slate-900 text-slate-400 border-slate-800'
+                                                                    className={`px-2 py-0.5 rounded text-[10px] font-black border disabled:opacity-30 ${
+                                                                        (att.horas_extra ?? 0) === hv
+                                                                            ? 'bg-cyan-500 text-slate-950 border-cyan-400'
+                                                                            : 'bg-slate-950 text-slate-300 border-slate-700'
                                                                     }`}
                                                                 >
-                                                                    {a.nombre}
+                                                                    {hv}h
                                                                 </button>
-                                                            )
-                                                        })}
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {asistenciasCat
+                                                            .filter((a) => ['X', 'F', 'D', 'P', 'V', 'I', 'C/S', 'DX'].includes(a.codigo))
+                                                            .map((a) => {
+                                                                const active = att.asistencia_id === a.id
+                                                                return (
+                                                                    <button
+                                                                        key={a.id}
+                                                                        onClick={() => {
+                                                                            const working = ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(a.codigo)
+                                                                            const copy = [...repAttendance]
+                                                                            copy[idx].asistencia_id = a.id
+                                                                            copy[idx].codigo = a.codigo
+                                                                            copy[idx].horas_extra = working ? (copy[idx].horas_extra || 4) : 0
+                                                                            setRepAttendance(copy)
+                                                                        }}
+                                                                        className={`px-2 py-1 rounded-lg text-[10px] font-black border ${
+                                                                            active
+                                                                                ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                                                                                : 'bg-slate-900 text-slate-400 border-slate-800'
+                                                                        }`}
+                                                                    >
+                                                                        {a.codigo} ({a.nombre.split(' ')[0]})
+                                                                    </button>
+                                                                )
+                                                            })}
                                                     </div>
                                                 </div>
                                             ))}

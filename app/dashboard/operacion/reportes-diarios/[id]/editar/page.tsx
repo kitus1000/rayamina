@@ -28,6 +28,7 @@ type AttendanceItem = {
     asistencia_id: string
     estado_codigo: string
     estado_color: string
+    horas_extra: number
     observacion: string
 }
 
@@ -134,7 +135,7 @@ export default function EditDailyReportPage({ params }: { params: Promise<{ id: 
             supabase.from('cat_turnos').select('*').eq('activo', true).order('codigo'),
             supabase.from('cat_cuadrillas').select('*').eq('activo', true).order('nombre'),
             supabase.from('mine_sites').select('*'),
-            supabase.from('cat_asistencias').select('*').eq('activo', true),
+            supabase.from('cat_asistencias').select('*').eq('activo', true).order('orden'),
             supabase.from('cat_roles_operativos').select('*').order('nombre'),
             supabase.from('cat_productos_mina').select('*, cat_producto_variables(*)').eq('activo', true).order('nombre'),
             supabase.from('ops_equipment').select('*').eq('status', 'DISPONIBLE').order('clave'),
@@ -197,8 +198,11 @@ export default function EditDailyReportPage({ params }: { params: Promise<{ id: 
             rol_nombre_default: a.rh_employees?.cat_roles_operativos?.nombre || 'Operativo',
             rol_dia_id: a.rol_asignado_id || a.rol_dia_id || a.rh_employees?.role_id,
             asistencia_id: a.asistencia_tipo_id || a.asistencia_id,
-            estado_codigo: a.cat_asistencias?.codigo || 'ASISTENCIA',
+            estado_codigo: a.cat_asistencias?.codigo || 'X',
             estado_color: a.cat_asistencias?.color || '#10b981',
+            horas_extra: ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(a.cat_asistencias?.codigo || 'X')
+                ? Math.max(0, Number(a.horas_trabajadas ?? 8) - 8)
+                : 0,
             observacion: a.observaciones || a.observacion || ''
         }))
         setAttendanceList(attList)
@@ -229,7 +233,8 @@ export default function EditDailyReportPage({ params }: { params: Promise<{ id: 
             attendance: attList.map(a => ({
                 empleado_id: a.empleado_id,
                 nombre: a.nombre,
-                estado_codigo: a.estado_codigo
+                estado_codigo: a.estado_codigo,
+                horas_extra: a.horas_extra
             })),
             activities: actList.map(a => ({
                 temp_id: a.temp_id,
@@ -306,7 +311,10 @@ export default function EditDailyReportPage({ params }: { params: Promise<{ id: 
         attendanceList.forEach(a => {
             const prev = origAttMap.get(a.empleado_id)
             if (prev && prev.estado_codigo !== a.estado_codigo) {
-                changes.push(`Asistencia de ${a.nombre.trim()}: ${prev.estado_codigo} → ${a.estado_codigo}`)
+                changes.push(`Incidencia de ${a.nombre.trim()}: ${prev.estado_codigo} → ${a.estado_codigo}`)
+            }
+            if (prev && Number(prev.horas_extra || 0) !== Number(a.horas_extra || 0)) {
+                changes.push(`H.E. de ${a.nombre.trim()}: ${prev.horas_extra || 0}h → ${a.horas_extra || 0}h`)
             }
         })
 
@@ -361,13 +369,17 @@ export default function EditDailyReportPage({ params }: { params: Promise<{ id: 
 
             // 2. Clear & Update Attendance (Re-insert is simpler for many-to-many)
             await supabase.from('ops_daily_attendance').delete().eq('report_id', id)
-            const attPayload = attendanceList.map(a => ({
-                report_id: id,
-                empleado_id: a.empleado_id,
-                asistencia_tipo_id: a.asistencia_id,
-                rol_asignado_id: a.rol_dia_id,
-                observaciones: a.observacion
-            }))
+            const attPayload = attendanceList.map(a => {
+                const working = ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(a.estado_codigo)
+                return {
+                    report_id: id,
+                    empleado_id: a.empleado_id,
+                    asistencia_tipo_id: a.asistencia_id,
+                    rol_asignado_id: a.rol_dia_id,
+                    horas_trabajadas: working ? 8 + Math.max(0, Number(a.horas_extra) || 0) : 0,
+                    observaciones: a.observacion
+                }
+            })
             await supabase.from('ops_daily_attendance').insert(attPayload)
 
             // 3. Clear & Update Items (Cascades to personnel split in DB if configured, otherwise manual)
@@ -721,7 +733,8 @@ export default function EditDailyReportPage({ params }: { params: Promise<{ id: 
                                 <thead className="bg-slate-950 text-[10px] text-slate-500 uppercase font-black tracking-widest">
                                     <tr>
                                         <th className="p-4">Personal</th>
-                                        <th className="p-4">Estatus Asistencia</th>
+                                        <th className="p-4">Incidencia Oficial</th>
+                                        <th className="p-4 text-center">H.E. (Hrs)</th>
                                         <th className="p-4">Rol en Turno</th>
                                         <th className="p-4">Observación</th>
                                     </tr>
@@ -739,22 +752,35 @@ export default function EditDailyReportPage({ params }: { params: Promise<{ id: 
                                                     onChange={e => {
                                                         const asis = asistenciasCatalog.find(a => a.id === e.target.value)
                                                         if (asis) {
+                                                            const working = ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(asis.codigo)
                                                             updateAttendance(idx, 'asistencia_id', asis.id)
                                                             updateAttendance(idx, 'estado_codigo', asis.codigo)
                                                             updateAttendance(idx, 'estado_color', asis.color)
+                                                            updateAttendance(idx, 'horas_extra', working ? (item.horas_extra || 4) : 0)
                                                         }
                                                     }}
-                                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white"
+                                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white font-bold"
                                                 >
-                                                    {asistenciasCatalog.map(a => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+                                                    {asistenciasCatalog.map(a => <option key={a.id} value={a.id}>{a.codigo} — {a.nombre}</option>)}
                                                 </select>
+                                            </td>
+                                            <td className="p-4 text-center">
+                                                <input
+                                                    type="number"
+                                                    min={0}
+                                                    max={16}
+                                                    disabled={!['X', 'ASISTENCIA', 'DX', 'DOX'].includes(item.estado_codigo)}
+                                                    value={item.horas_extra ?? 0}
+                                                    onChange={e => updateAttendance(idx, 'horas_extra', parseFloat(e.target.value) || 0)}
+                                                    className="w-16 bg-slate-950 border border-slate-700 rounded-lg p-1.5 text-center text-cyan-300 font-bold text-xs disabled:opacity-40"
+                                                />
                                             </td>
                                             <td className="p-4">
                                                 <select
                                                     value={item.rol_dia_id}
                                                     onChange={e => updateAttendance(idx, 'rol_dia_id', e.target.value)}
                                                     className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-slate-300"
-                                                    disabled={item.estado_codigo !== 'ASISTENCIA'}
+                                                    disabled={!['X', 'ASISTENCIA', 'DX', 'DOX'].includes(item.estado_codigo)}
                                                 >
                                                     {rolesOperativos.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
                                                 </select>
@@ -992,7 +1018,7 @@ export default function EditDailyReportPage({ params }: { params: Promise<{ id: 
                                     <div>
                                         <label className="block text-[10px] text-slate-500 mb-3 font-black uppercase tracking-widest">Asignar Personal a la Actividad</label>
                                         <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
-                                            {attendanceList.filter(a => a.estado_codigo === 'ASISTENCIA').map(att => (
+                                            {attendanceList.filter(a => ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(a.estado_codigo)).map(att => (
                                                 <label key={att.empleado_id} className={`flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer ${currentActivity.participantes?.includes(att.empleado_id) ? 'bg-amber-900/20 border-amber-500/50' : 'bg-slate-950 border-slate-800'}`}>
                                                     <input type="checkbox" checked={currentActivity.participantes?.includes(att.empleado_id)} onChange={e => {
                                                         const p = currentActivity.participantes || []

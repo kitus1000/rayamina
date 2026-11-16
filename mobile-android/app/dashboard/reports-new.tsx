@@ -47,6 +47,7 @@ type AttendanceItem = {
     rol_dia_id: string | null
     asistencia_id: string
     estado_codigo: string
+    horas_extra?: number
 }
 
 type ActivityItem = {
@@ -126,7 +127,7 @@ export default function NewReportWizard() {
                 supabase.from('cat_turnos').select('*').eq('activo', true).order('codigo'),
                 supabase.from('cat_cuadrillas').select('*').eq('activo', true).order('nombre'),
                 supabase.from('mine_sites').select('*'),
-                supabase.from('cat_asistencias').select('*').eq('activo', true),
+                supabase.from('cat_asistencias').select('*').eq('activo', true).order('orden'),
                 supabase.from('cat_productos_mina').select('*, cat_producto_variables(*)').eq('activo', true).order('nombre'),
                 supabase.from('ops_equipment').select('*').order('clave'),
             ])
@@ -183,7 +184,7 @@ export default function NewReportWizard() {
                 .eq('cuadrilla_id', selectedCuadrilla)
 
             const defaultAsist =
-                asistenciasCatalog.find((a) => a.codigo === 'ASISTENCIA' || a.codigo === 'A') ||
+                asistenciasCatalog.find((a) => a.codigo === 'X' || a.codigo === 'ASISTENCIA' || a.codigo === 'A') ||
                 asistenciasCatalog[0]
 
             if (data && defaultAsist) {
@@ -211,6 +212,7 @@ export default function NewReportWizard() {
                             rol_dia_id: rId,
                             asistencia_id: defaultAsist.id,
                             estado_codigo: defaultAsist.codigo,
+                            horas_extra: ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(defaultAsist.codigo) ? 4 : 0,
                         })
                     }
                 })
@@ -227,7 +229,7 @@ export default function NewReportWizard() {
         const firstProd = products[0]
         const firstLoc = ubicaciones[0]
         const presentIds = attendanceList
-            .filter((a) => a.estado_codigo === 'ASISTENCIA' || a.estado_codigo === 'A')
+            .filter((a) => ['X', 'ASISTENCIA', 'A', 'DX', 'DOX'].includes(a.estado_codigo))
             .map((a) => a.empleado_id)
 
         setCurrentActivity({
@@ -295,17 +297,20 @@ export default function NewReportWizard() {
 
             // 2. Insertar Pase de Lista (ops_daily_attendance)
             if (attendanceList.length > 0) {
-                const attPayload = attendanceList.map((item) => ({
-                    report_id: reportId,
-                    empleado_id: item.empleado_id,
-                    asistencia_tipo_id: item.asistencia_id,
-                    asistencia_id: item.asistencia_id,
-                    rol_asignado_id: item.rol_dia_id,
-                    rol_dia_id: item.rol_dia_id,
-                    horas_trabajadas: 8,
-                    observaciones: '',
-                    observacion: '',
-                }))
+                const attPayload = attendanceList.map((item) => {
+                    const working = ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(item.estado_codigo)
+                    return {
+                        report_id: reportId,
+                        empleado_id: item.empleado_id,
+                        asistencia_tipo_id: item.asistencia_id,
+                        asistencia_id: item.asistencia_id,
+                        rol_asignado_id: item.rol_dia_id,
+                        rol_dia_id: item.rol_dia_id,
+                        horas_trabajadas: working ? 8 + Math.max(0, Number(item.horas_extra) || 0) : 0,
+                        observaciones: '',
+                        observacion: '',
+                    }
+                })
                 const { error: attError } = await supabase
                     .from('ops_daily_attendance')
                     .insert(attPayload)
@@ -662,9 +667,11 @@ export default function NewReportWizard() {
                                             <TouchableOpacity
                                                 key={a.id}
                                                 onPress={() => {
+                                                    const working = ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(a.codigo)
                                                     const copy = [...attendanceList]
                                                     copy[idx].asistencia_id = a.id
                                                     copy[idx].estado_codigo = a.codigo
+                                                    copy[idx].horas_extra = working ? (copy[idx].horas_extra || 4) : 0
                                                     setAttendanceList(copy)
                                                 }}
                                                 style={[
@@ -686,12 +693,47 @@ export default function NewReportWizard() {
                                                         color: isSel ? '#022C22' : textPrimary,
                                                     }}
                                                 >
-                                                    {a.nombre}
+                                                    {a.codigo} — {a.nombre}
                                                 </Text>
                                             </TouchableOpacity>
                                         )
                                     })}
                                 </ScrollView>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: borderCol }}>
+                                    <Text style={{ fontSize: 10, fontWeight: '800', color: textSecondary }}>
+                                        H.E. (Horas Extra):
+                                    </Text>
+                                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                                        {[0, 2, 4, 5].map((hv) => {
+                                            const heSel = (item.horas_extra ?? 0) === hv
+                                            const isWorking = ['X', 'ASISTENCIA', 'DX', 'DOX'].includes(item.estado_codigo)
+                                            return (
+                                                <TouchableOpacity
+                                                    key={hv}
+                                                    disabled={!isWorking}
+                                                    onPress={() => {
+                                                        const copy = [...attendanceList]
+                                                        copy[idx].horas_extra = hv
+                                                        setAttendanceList(copy)
+                                                    }}
+                                                    style={{
+                                                        paddingHorizontal: 8,
+                                                        paddingVertical: 4,
+                                                        borderRadius: 8,
+                                                        borderWidth: 1,
+                                                        opacity: isWorking ? 1 : 0.35,
+                                                        backgroundColor: heSel ? '#06B6D4' : bgInput,
+                                                        borderColor: heSel ? '#0891B2' : borderCol,
+                                                    }}
+                                                >
+                                                    <Text style={{ fontSize: 10, fontWeight: '900', color: heSel ? '#022C22' : textPrimary }}>
+                                                        {hv}h
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            )
+                                        })}
+                                    </View>
+                                </View>
                             </View>
                         ))}
                     </View>

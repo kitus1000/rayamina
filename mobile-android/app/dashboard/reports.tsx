@@ -82,7 +82,7 @@ export default function MobileReportsListScreen() {
                     .order('fecha', { ascending: false })
                     .limit(25),
                 getAllReportRevisions(),
-                supabase.from('cat_asistencias').select('id, nombre, codigo_corto').order('nombre'),
+                supabase.from('cat_asistencias').select('id, nombre, codigo, orden').order('orden'),
             ])
 
             setReportes(data || [])
@@ -254,7 +254,7 @@ export default function MobileReportsListScreen() {
             }
 
             // 3. Actualizar asistencias corregidas
-            const catById = new Map(asistenciasCat.map((c: any) => [c.id, c.codigo_corto || c.nombre]))
+            const catById = new Map(asistenciasCat.map((c: any) => [c.id, c.codigo ? `${c.codigo} (${c.nombre})` : c.nombre]))
             for (const att of editAttendance) {
                 if (att.asistenciaId && att.asistenciaId !== att.origAsistenciaId) {
                     const prevCode = catById.get(att.origAsistenciaId) || 'Anterior'
@@ -619,7 +619,7 @@ export default function MobileReportsListScreen() {
                                                                     color: selected ? '#022C22' : textPrimary,
                                                                 }}
                                                             >
-                                                                {cat.codigo_corto || cat.nombre}
+                                                                {cat.codigo ? `${cat.codigo} — ${cat.nombre}` : cat.nombre}
                                                             </Text>
                                                         </TouchableOpacity>
                                                     )
