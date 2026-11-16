@@ -492,6 +492,85 @@ export default function MobileSquadsScreen() {
                     </View>
                 </View>
 
+                {/* TARJETA DE GUARDIA Y ROTACIÓN 14×7 (DÍA / NOCHE / DESCANSO) */}
+                <View
+                    style={[
+                        styles.ruleBanner,
+                        {
+                            backgroundColor: '#06B6D418',
+                            borderColor: '#06B6D4',
+                            flexDirection: 'column',
+                            alignItems: 'stretch',
+                            gap: 8,
+                        },
+                    ]}
+                >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                            <Text style={[styles.ruleTitle, { color: '#22D3EE' }]}>
+                                🔄 ROL MINERO 14×7 (14d Mina × 7d Descanso)
+                            </Text>
+                            <Text style={[styles.ruleSub, { color: textSecondary }]}>
+                                Guardia Día • Guardia Noche • Cuadrilla en Descanso
+                            </Text>
+                        </View>
+                        {canMoveSquads && (
+                            <TouchableOpacity
+                                onPress={async () => {
+                                    try {
+                                        const { data: turnosList } = await supabase
+                                            .from('cat_turnos')
+                                            .select('id, codigo, nombre')
+                                            .eq('activo', true)
+                                        const tDia = (turnosList || []).find((t: any) => t.codigo === 'T1')
+                                        const tNoche = (turnosList || []).find((t: any) => t.codigo === 'T2')
+                                        const tDesc = (turnosList || []).find((t: any) => t.codigo === 'DESC')
+                                        if (!tDia || !tNoche || !tDesc) {
+                                            Alert.alert('Aviso', 'Faltan turnos T1, T2 o DESC en el catálogo.')
+                                            return
+                                        }
+                                        const updates: Array<{ id: string; nextId: string }> = []
+                                        cuadrillas.forEach((c: any) => {
+                                            const code = (c.codigo || '').toUpperCase()
+                                            const tObj = Array.isArray(c.cat_turnos) ? c.cat_turnos[0] : c.cat_turnos
+                                            const curT = tObj?.codigo || 'T1'
+                                            if (code === 'C1' || code === 'C2' || code === 'C3' || curT === 'DESC' || curT === 'T2') {
+                                                let nextT = tDia.id
+                                                if (curT === 'T1') nextT = tNoche.id
+                                                else if (curT === 'T2') nextT = tDesc.id
+                                                else if (curT === 'DESC') nextT = tDia.id
+                                                updates.push({ id: c.id, nextId: nextT })
+                                            }
+                                        })
+                                        await Promise.all(
+                                            updates.map((u) =>
+                                                supabase.from('cat_cuadrillas').update({ turno_actual_id: u.nextId }).eq('id', u.id)
+                                            )
+                                        )
+                                        await loadSquadsData(true)
+                                        Alert.alert(
+                                            '🔄 Guardia 14×7 Rotada',
+                                            'Descanso sube a Turno Día • Día pasa a Turno Noche • Noche baja a 7 días de Descanso.'
+                                        )
+                                    } catch (e: any) {
+                                        Alert.alert('Error', e?.message || 'No se pudo rotar el rol 14x7')
+                                    }
+                                }}
+                                style={{
+                                    backgroundColor: '#06B6D4',
+                                    paddingHorizontal: 10,
+                                    paddingVertical: 7,
+                                    borderRadius: 10,
+                                }}
+                            >
+                                <Text style={{ color: '#022C22', fontSize: 11, fontWeight: '900' }}>
+                                    🔄 Rotar 14×7
+                                </Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                </View>
+
                 {/* SELECTOR HORIZONTAL DE LAS 5 CUADRILLAS */}
                 <ScrollView
                     horizontal
@@ -501,6 +580,9 @@ export default function MobileSquadsScreen() {
                     {cuadrillas.map((sq) => {
                         const isSelected = activeSquad?.id === sq.id
                         const count = (membersBySquad[sq.id] || []).length
+                        const tObj = Array.isArray(sq.cat_turnos) ? sq.cat_turnos[0] : sq.cat_turnos
+                        const tCode = tObj?.codigo || 'T1'
+                        const shiftIcon = tCode === 'DESC' ? '🏠 ' : tCode === 'T2' ? '🌙 ' : '☀️ '
                         return (
                             <TouchableOpacity
                                 key={sq.id}
@@ -519,7 +601,7 @@ export default function MobileSquadsScreen() {
                                         { color: isSelected ? '#022C22' : textPrimary },
                                     ]}
                                 >
-                                    {sq.nombre}
+                                    {shiftIcon}{sq.nombre}
                                 </Text>
                                 <View
                                     style={[
@@ -567,7 +649,15 @@ export default function MobileSquadsScreen() {
                                     </Text>
                                 </View>
                                 <View style={styles.pitchBadge}>
-                                    <Text style={styles.pitchBadgeText}>EN TURNO</Text>
+                                    <Text style={styles.pitchBadgeText}>
+                                        {(() => {
+                                            const tObj = Array.isArray(activeSquad?.cat_turnos)
+                                                ? activeSquad?.cat_turnos[0]
+                                                : activeSquad?.cat_turnos
+                                            const c = tObj?.codigo || 'T1'
+                                            return c === 'DESC' ? '🏠 DESCANSO 14×7' : c === 'T2' ? '🌙 TURNO NOCHE' : '☀️ TURNO DÍA'
+                                        })()}
+                                    </Text>
                                 </View>
                             </View>
 

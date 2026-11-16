@@ -15,6 +15,9 @@ type PreNominaRow = {
     sueldo_diario: number
     dias_asistidos: number
     dias_falta: number
+    dias_descanso_14x7?: number
+    cuadrilla_nombre?: string
+    guardia_14x7?: 'DIA' | 'NOCHE' | 'DESCANSO'
     total_sueldo_fijo: number
     destajos: {
         producto_nombre: string
@@ -30,6 +33,7 @@ export default function PreNominaPage() {
     const [selectedSemana, setSelectedSemana] = useState<string>('')
     const [loading, setLoading] = useState(false)
     const [isExporting, setIsExporting] = useState(false)
+    const [guardiaFilter, setGuardiaFilter] = useState<'TODAS' | 'MINA' | 'DESCANSO'>('TODAS')
 
     const { sysRole } = useAuth()
     const isReadOnly = sysRole === 'LECTURA'
@@ -127,6 +131,32 @@ export default function PreNominaPage() {
                 reportIds.includes(ip.ops_report_items.report_id)
             )
 
+            // 3.5 Obtener Cuadrillas y Turno Actual 14x7 para cruzar la Guardia (Día / Noche / Descanso)
+            const { data: squadMembersData } = await supabase
+                .from('cat_cuadrillas_miembros')
+                .select(`
+                    empleado_id,
+                    cuadrilla_id,
+                    cat_cuadrillas(id, nombre, codigo, turno_actual_id, cat_turnos(codigo, nombre)),
+                    rh_employees(id, first_name, last_name, employee_code, sueldo_diario_base, status, cat_puestos(nombre, tipo_personal))
+                `)
+
+            const empSquadMeta = new Map<string, { cuadrilla_nombre: string; guardia_14x7: 'DIA' | 'NOCHE' | 'DESCANSO'; emp?: any }>()
+            if (squadMembersData) {
+                squadMembersData.forEach((sm: any) => {
+                    const cuad = Array.isArray(sm.cat_cuadrillas) ? sm.cat_cuadrillas[0] : sm.cat_cuadrillas
+                    const turnoObj = cuad?.cat_turnos ? (Array.isArray(cuad.cat_turnos) ? cuad.cat_turnos[0] : cuad.cat_turnos) : null
+                    const tCode = (turnoObj?.codigo || 'T1').toUpperCase()
+                    const guardia: 'DIA' | 'NOCHE' | 'DESCANSO' =
+                        tCode === 'DESC' ? 'DESCANSO' : tCode === 'T2' ? 'NOCHE' : 'DIA'
+                    empSquadMeta.set(sm.empleado_id, {
+                        cuadrilla_nombre: cuad?.nombre || 'Cuadrilla General',
+                        guardia_14x7: guardia,
+                        emp: Array.isArray(sm.rh_employees) ? sm.rh_employees[0] : sm.rh_employees
+                    })
+                })
+            }
+
             // Mapa de Empleados para Consolidación
             const mapaEmp = new Map<string, PreNominaRow>()
 
@@ -137,8 +167,9 @@ export default function PreNominaPage() {
                     const tipoPersonal = att.rh_employees?.cat_puestos?.tipo_personal?.toUpperCase() || ''
                     if (tipoPersonal !== 'OPERATIVO') return // FILTER ONLY OPERATIVE PERSONNEL
 
+                    const sqMeta = empSquadMeta.get(empId)
+
                     if (!mapaEmp.has(empId)) {
-                        console.log("Adding operative employee to map:", empId, att.rh_employees.first_name);
                         mapaEmp.set(empId, {
                             empleado_id: empId,
                             nombre: `${att.rh_employees.first_name} ${att.rh_employees.last_name}`,
@@ -147,6 +178,9 @@ export default function PreNominaPage() {
                             sueldo_diario: parseFloat(att.rh_employees.sueldo_diario_base || 0),
                             dias_asistidos: 0,
                             dias_falta: 0,
+                            dias_descanso_14x7: 0,
+                            cuadrilla_nombre: sqMeta?.cuadrilla_nombre || 'Guardia Mina',
+                            guardia_14x7: sqMeta?.guardia_14x7 || 'DIA',
                             total_sueldo_fijo: 0,
                             destajos: [],
                             total_destajos: 0,
@@ -156,11 +190,19 @@ export default function PreNominaPage() {
                     }
 
                     const row = mapaEmp.get(empId)!
-                    const isAsistencia = att.cat_asistencias?.codigo === 'ASISTENCIA'
+                    const attCodeRaw = (att.cat_asistencias?.codigo || '').toUpperCase()
+                    const isPaidDay =
+                        attCodeRaw === 'ASISTENCIA' ||
+                        attCodeRaw === 'DESCANSO' ||
+                        attCodeRaw === 'PERMISO_C_GOCE' ||
+                        attCodeRaw === 'VACACIONES'
 
-                    if (isAsistencia) {
+                    if (isPaidDay) {
                         row.dias_asistidos++
                         row.total_sueldo_fijo += row.sueldo_diario
+                    }
+                    if (attCodeRaw === 'DESCANSO') {
+                        row.dias_descanso_14x7 = (row.dias_descanso_14x7 || 0) + 1
                     }
 
                     const fecha = reportMap.get(att.report_id)
@@ -182,13 +224,15 @@ export default function PreNominaPage() {
                             'S': 80,  // Suspension
                             'V': 70,  // Vacaciones
                             'P': 60,  // Permiso
-                            'D': 50,  // Descanso
+                            'D': 50,  // Descanso 14x7
                             'A': 40,  // Asistencia
                             'O': 10,  // Otro
                         }
 
                         // Strict Mappings for common logic
-                        if (attCode.includes('ASIST') || attName.includes('ASIST') || attCode === 'A') {
+                        if (attCode.includes('DESC') || attName.includes('DESC') || attCode === 'D') {
+                            statusVal = 'D'
+                        } else if (attCode.includes('ASIST') || attName.includes('ASIST') || attCode === 'A') {
                             statusVal = 'A'
                         } else if (attCode.includes('FALTA') || attName.includes('FALTA') || attCode === 'F' || attName === 'F' || attCode.includes('INCIDENCIA')) {
                             statusVal = 'F'
@@ -207,7 +251,6 @@ export default function PreNominaPage() {
                             const newPriority = priority[statusVal] || 0
 
                             if (newPriority > currentPriority) {
-                                console.log(`Conflict resolved for ${row.nombre} on ${dayName}: ${currentStatus} -> ${statusVal}`);
                                 row.asistencia_diaria[dayName] = statusVal
                             }
                         } else {
@@ -216,6 +259,45 @@ export default function PreNominaPage() {
                     }
                 })
             }
+
+            // 4.5 Incorporar automáticamente a la Cuadrilla en Descanso (Rol 14x7)
+            // En el esquema 14x7, la cuadrilla que está en su semana de bajada (7 días de descanso)
+            // no genera reportes diarios de rezaga en mina, pero cobra su semana de descanso base.
+            empSquadMeta.forEach((meta, empId) => {
+                if (meta.guardia_14x7 === 'DESCANSO' && meta.emp && !mapaEmp.has(empId)) {
+                    const empObj = meta.emp
+                    const puestoObj = Array.isArray(empObj.cat_puestos) ? empObj.cat_puestos[0] : empObj.cat_puestos
+                    const tipoPersonal = (puestoObj?.tipo_personal || 'OPERATIVO').toUpperCase()
+                    if (tipoPersonal !== 'OPERATIVO') return
+
+                    const sueldoDiario = parseFloat(empObj.sueldo_diario_base || 0)
+                    mapaEmp.set(empId, {
+                        empleado_id: empId,
+                        nombre: `${empObj.first_name} ${empObj.last_name}`,
+                        codigo: empObj.employee_code || '-',
+                        puesto: puestoObj?.nombre || 'Operativo Mina',
+                        sueldo_diario: sueldoDiario,
+                        dias_asistidos: 7,
+                        dias_falta: 0,
+                        dias_descanso_14x7: 7,
+                        cuadrilla_nombre: meta.cuadrilla_nombre,
+                        guardia_14x7: 'DESCANSO',
+                        total_sueldo_fijo: sueldoDiario * 7,
+                        destajos: [],
+                        total_destajos: 0,
+                        total_general: sueldoDiario * 7,
+                        asistencia_diaria: {
+                            lunes: 'D',
+                            martes: 'D',
+                            miercoles: 'D',
+                            jueves: 'D',
+                            viernes: 'D',
+                            sabado: 'D',
+                            domingo: 'D'
+                        }
+                    })
+                }
+            })
 
             itemsValidos.forEach((ip: any) => {
                 const empId = ip.empleado_id
@@ -711,6 +793,45 @@ export default function PreNominaPage() {
                 </div>
             </div>
 
+            {/* FILTRO DE GUARDIA Y ESQUEMA 14×7 */}
+            {selectedSemana && !loading && nominaData.length > 0 && (
+                <div className="mb-4 bg-slate-900/90 border border-cyan-500/30 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                        <span className="px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/40 text-cyan-400 font-black text-xs">
+                            ROL 14×7
+                        </span>
+                        <div>
+                            <div className="text-sm font-black text-white">
+                                Control de Nómina por Guardia Rotativa (14 Días Laborados × 7 Días de Descanso)
+                            </div>
+                            <div className="text-xs text-slate-400">
+                                Filtra entre cuadrillas activas en interior mina (Turno Día y Noche) y cuadrilla en semana de descanso con sueldo base garantizado.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                        {[
+                            { id: 'TODAS', label: `Todas (${nominaData.length})` },
+                            { id: 'MINA', label: `☀️🌙 En Mina (${nominaData.filter(r => r.guardia_14x7 !== 'DESCANSO').length})` },
+                            { id: 'DESCANSO', label: `🏠 En Descanso 14×7 (${nominaData.filter(r => r.guardia_14x7 === 'DESCANSO').length})` }
+                        ].map(tab => (
+                            <button
+                                key={tab.id}
+                                onClick={() => setGuardiaFilter(tab.id as any)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                                    guardiaFilter === tab.id
+                                        ? 'bg-cyan-500 text-slate-950 shadow'
+                                        : 'text-slate-400 hover:text-white'
+                                }`}
+                            >
+                                {tab.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             {/* DATA GRID */}
             {selectedSemana && !loading && nominaData.length > 0 && (
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
@@ -718,8 +839,8 @@ export default function PreNominaPage() {
                         <table className="w-full text-left text-sm text-slate-300">
                             <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider font-semibold">
                                 <tr>
-                                    <th className="px-6 py-5">Empleado</th>
-                                    <th className="px-6 py-5 text-center">Asist.</th>
+                                    <th className="px-6 py-5">Empleado / Guardia 14×7</th>
+                                    <th className="px-6 py-5 text-center">Asist. / Rol</th>
                                     <th className="px-6 py-5 text-right">Sueldo Base</th>
                                     <th className="px-6 py-5">Desglose Destajos</th>
                                     <th className="px-6 py-5 text-right">Monto Destajos</th>
@@ -727,16 +848,54 @@ export default function PreNominaPage() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800/50">
-                                {nominaData.map((row) => (
+                                {nominaData
+                                    .filter(r => {
+                                        if (guardiaFilter === 'MINA') return r.guardia_14x7 !== 'DESCANSO'
+                                        if (guardiaFilter === 'DESCANSO') return r.guardia_14x7 === 'DESCANSO'
+                                        return true
+                                    })
+                                    .map((row) => (
                                     <tr key={row.empleado_id} className="hover:bg-slate-800/40 transition-colors">
                                         <td className="px-6 py-4">
-                                            <div className="font-bold text-white">{row.nombre}</div>
-                                            <div className="text-xs text-slate-500">{row.puesto} ({row.codigo})</div>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="font-bold text-white">{row.nombre}</span>
+                                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                                                    row.guardia_14x7 === 'DESCANSO'
+                                                        ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40'
+                                                        : row.guardia_14x7 === 'NOCHE'
+                                                        ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                                                        : 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                                                }`}>
+                                                    {row.guardia_14x7 === 'DESCANSO'
+                                                        ? `🏠 ${row.cuadrilla_nombre || 'Cuadrilla'} • DESCANSO 14×7`
+                                                        : row.guardia_14x7 === 'NOCHE'
+                                                        ? `🌙 ${row.cuadrilla_nombre || 'Cuadrilla'} • TURNO NOCHE`
+                                                        : `☀️ ${row.cuadrilla_nombre || 'Cuadrilla'} • TURNO DÍA`}
+                                                </span>
+                                            </div>
+                                            <div className="text-xs text-slate-500 mt-0.5">{row.puesto} ({row.codigo})</div>
                                             <div className="mt-1 text-xs text-slate-600">Sueldo Diario: {formatMoney(row.sueldo_diario)}</div>
                                         </td>
                                         <td className="px-6 py-4 text-center">
                                             <div className="font-bold text-white text-lg">{row.dias_asistidos}</div>
-                                            {row.dias_falta > 0 && <div className="text-[10px] text-red-500 bg-red-950/30 px-2 py-0.5 rounded-full inline-block mt-1">{row.dias_falta} Faltas</div>}
+                                            {row.guardia_14x7 === 'DESCANSO' ? (
+                                                <div className="text-[10px] text-cyan-300 bg-cyan-950/50 border border-cyan-500/30 px-2 py-0.5 rounded-full inline-block mt-1 font-bold">
+                                                    7d Descanso 14×7 (D)
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    {row.dias_descanso_14x7 && row.dias_descanso_14x7 > 0 ? (
+                                                        <div className="text-[10px] text-cyan-400 bg-cyan-950/30 px-2 py-0.5 rounded-full inline-block mt-1 mr-1">
+                                                            {row.dias_descanso_14x7}d Descanso
+                                                        </div>
+                                                    ) : null}
+                                                    {row.dias_falta > 0 && (
+                                                        <div className="text-[10px] text-red-500 bg-red-950/30 px-2 py-0.5 rounded-full inline-block mt-1">
+                                                            {row.dias_falta} Faltas
+                                                        </div>
+                                                    )}
+                                                </>
+                                            )}
                                         </td>
                                         <td className="px-6 py-4 text-right font-medium">
                                             {formatMoney(row.total_sueldo_fijo)}
@@ -751,6 +910,10 @@ export default function PreNominaPage() {
                                                         </div>
                                                     ))}
                                                 </div>
+                                            ) : row.guardia_14x7 === 'DESCANSO' ? (
+                                                <span className="text-xs text-cyan-400/80 font-semibold italic">
+                                                    🏠 Semana de Bajada (Rol 14×7 - Sin guardia en frente)
+                                                </span>
                                             ) : (
                                                 <span className="text-xs text-slate-600 italic">- Sin destajos facturados -</span>
                                             )}

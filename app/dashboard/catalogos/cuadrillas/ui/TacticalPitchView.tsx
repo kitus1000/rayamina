@@ -43,6 +43,15 @@ interface Cuadrilla {
     supervisor_name?: string
     supervisor_user_id?: string | null
     supervisor_user_email?: string | null
+    turno_actual_id?: string | null
+    turno_codigo?: string
+    turno_nombre?: string
+}
+
+interface TurnoCatalogo {
+    id: string
+    nombre: string
+    codigo: string
 }
 
 interface WebSysUser {
@@ -92,6 +101,8 @@ export default function TacticalPitchView() {
     const [supEditEmpId, setSupEditEmpId] = useState<string>('')
     const [supEditWebEmail, setSupEditWebEmail] = useState<string>('')
     const [savingSupervisor, setSavingSupervisor] = useState(false)
+    const [turnosCatalogo, setTurnosCatalogo] = useState<TurnoCatalogo[]>([])
+    const [rotating14x7, setRotating14x7] = useState(false)
     const [globalAssignments, setGlobalAssignments] = useState<Record<string, {
         cuadrilla_id: string
         cuadrilla_nombre: string
@@ -148,6 +159,7 @@ export default function TacticalPitchView() {
             const meta = metaMap[c.id]
             const supEmp = Array.isArray(c.rh_employees) ? c.rh_employees[0] : c.rh_employees
             const empName = supEmp ? `${supEmp.first_name} ${supEmp.last_name}`.trim() : ''
+            const turnoObj = Array.isArray(c.cat_turnos) ? c.cat_turnos[0] : c.cat_turnos
             return {
                 id: c.id,
                 nombre: c.nombre,
@@ -155,7 +167,10 @@ export default function TacticalPitchView() {
                 supervisor_id: c.supervisor_id || meta?.supervisor_employee_id || null,
                 supervisor_name: empName || meta?.supervisor_employee_name || meta?.supervisor_user_name || '',
                 supervisor_user_id: meta?.supervisor_user_id || null,
-                supervisor_user_email: meta?.supervisor_user_email || null
+                supervisor_user_email: meta?.supervisor_user_email || null,
+                turno_actual_id: c.turno_actual_id || turnoObj?.id || null,
+                turno_codigo: turnoObj?.codigo || 'T1',
+                turno_nombre: turnoObj?.nombre || 'Primer Turno (Día)'
             }
         })
     }
@@ -163,10 +178,10 @@ export default function TacticalPitchView() {
     const loadInitialData = async () => {
         setLoading(true)
 
-        const [{ data: cData }, metaMap, { data: uData }, { data: eData }] = await Promise.all([
+        const [{ data: cData }, metaMap, { data: uData }, { data: eData }, { data: tData }] = await Promise.all([
             supabase
                 .from('cat_cuadrillas')
-                .select('id, nombre, codigo, supervisor_id, rh_employees(id, first_name, last_name, employee_code)')
+                .select('id, nombre, codigo, supervisor_id, turno_actual_id, cat_turnos(id, nombre, codigo), rh_employees(id, first_name, last_name, employee_code)')
                 .eq('activo', true)
                 .order('nombre'),
             getSquadSupervisorsMeta(),
@@ -181,12 +196,18 @@ export default function TacticalPitchView() {
                     puesto:cat_puestos(nombre)
                 `)
                 .in('status', ['ACTIVO', 'ACTIVE'])
-                .order('employee_code')
+                .order('employee_code'),
+            supabase
+                .from('cat_turnos')
+                .select('id, nombre, codigo')
+                .eq('activo', true)
+                .order('codigo')
         ])
 
         setSupervisorMetaMap(metaMap)
         if (uData) setWebUsers(uData as WebSysUser[])
         if (eData) setBancoPersonal(eData as any)
+        if (tData) setTurnosCatalogo(tData as TurnoCatalogo[])
 
         const enriched = buildCuadrillasWithSupervisors(cData || [], metaMap)
         if (enriched.length > 0) {
@@ -289,6 +310,95 @@ export default function TacticalPitchView() {
         await refreshGlobalAssignments(nextCuadrillas)
         setSavingSupervisor(false)
         triggerActionNotice(`✅ Supervisor asignado: ${empName || webSup?.full_name} a ${activeCuadrilla?.nombre}`)
+    }
+
+    const handleChangeSquadTurn = async (cuadId: string, newTurnoId: string) => {
+        if (!canEdit || !newTurnoId) return
+        const targetTurno = turnosCatalogo.find(t => t.id === newTurnoId)
+        if (!targetTurno) return
+
+        const { error } = await supabase
+            .from('cat_cuadrillas')
+            .update({ turno_actual_id: newTurnoId })
+            .eq('id', cuadId)
+
+        if (error) {
+            alert('Error al actualizar turno 14x7: ' + error.message)
+            return
+        }
+
+        const targetCuad = cuadrillas.find(c => c.id === cuadId)
+        const nextCuadrillas = cuadrillas.map(c =>
+            c.id === cuadId
+                ? {
+                    ...c,
+                    turno_actual_id: newTurnoId,
+                    turno_codigo: targetTurno.codigo,
+                    turno_nombre: targetTurno.nombre
+                }
+                : c
+        )
+        setCuadrillas(nextCuadrillas)
+        triggerActionNotice(`🔄 Rol 14x7 actualizado: ${targetCuad?.nombre} ahora en ${targetTurno.nombre}`)
+    }
+
+    const handleRotate14x7Cycle = async () => {
+        if (!canEdit || rotating14x7) return
+        setRotating14x7(true)
+
+        try {
+            const tDia = turnosCatalogo.find(t => t.codigo === 'T1')
+            const tNoche = turnosCatalogo.find(t => t.codigo === 'T2')
+            const tDesc = turnosCatalogo.find(t => t.codigo === 'DESC')
+
+            if (!tDia || !tNoche || !tDesc) {
+                alert('Faltan turnos T1 (Día), T2 (Noche) o DESC (Descanso 14x7) en el catálogo.')
+                setRotating14x7(false)
+                return
+            }
+
+            // Ciclo 14x7: Descanso -> Día -> Noche -> Descanso
+            const updates: Array<{ id: string; nextTurno: TurnoCatalogo }> = []
+            cuadrillas.forEach(c => {
+                const code = (c.codigo || '').toUpperCase()
+                // Rotamos las cuadrillas principales C1, C2, C3 (o las que estén en T1/T2/DESC)
+                if (code === 'C1' || code === 'C2' || code === 'C3' || c.turno_codigo === 'DESC' || c.turno_codigo === 'T2') {
+                    let nextT = tDia
+                    if (c.turno_codigo === 'T1') nextT = tNoche
+                    else if (c.turno_codigo === 'T2') nextT = tDesc
+                    else if (c.turno_codigo === 'DESC') nextT = tDia
+                    updates.push({ id: c.id, nextTurno: nextT })
+                }
+            })
+
+            await Promise.all(
+                updates.map(u =>
+                    supabase
+                        .from('cat_cuadrillas')
+                        .update({ turno_actual_id: u.nextTurno.id })
+                        .eq('id', u.id)
+                )
+            )
+
+            const updateMap = new Map(updates.map(u => [u.id, u.nextTurno]))
+            const nextCuadrillas = cuadrillas.map(c => {
+                const nt = updateMap.get(c.id)
+                if (!nt) return c
+                return {
+                    ...c,
+                    turno_actual_id: nt.id,
+                    turno_codigo: nt.codigo,
+                    turno_nombre: nt.nombre
+                }
+            })
+
+            setCuadrillas(nextCuadrillas)
+            triggerActionNotice('🔄 Guardia 14x7 Rotada: Descanso sube a Turno Día • Día pasa a Noche • Noche baja a 7 días de Descanso')
+        } catch (err: any) {
+            alert('Error al rotar ciclo 14x7: ' + (err?.message || ''))
+        } finally {
+            setRotating14x7(false)
+        }
     }
 
     const inferZoneFromPosition = (puestoNombre?: string): 'AVANCE' | 'REZAGA' | 'ACARREO' | 'SERVICIOS' => {
@@ -706,6 +816,109 @@ export default function TacticalPitchView() {
                             </>
                         )}
                     </div>
+                </div>
+            </div>
+
+            {/* TABLERO DE ROL Y GUARDIA CONTINUA 14x7 (DÍA / NOCHE / DESCANSO) */}
+            <div className="bg-slate-900/95 border-2 border-cyan-500/30 rounded-2xl p-4 shadow-xl space-y-3">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shrink-0 text-lg font-black">
+                            14×7
+                        </div>
+                        <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="text-sm font-black text-white uppercase tracking-wide">
+                                    Esquema de Rol Minero 14×7 • Guardias Activas (Día, Noche y Descanso)
+                                </h3>
+                                <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-400 text-[10px] font-black uppercase">
+                                    14 Días Laborados × 7 Días Descansados
+                                </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400">
+                                Rotación continua 24/7: mientras dos cuadrillas operan en interior mina (Día y Noche), la tercera cumple sus 7 días francos de descanso con goce de sueldo base en Pre-Nómina.
+                            </p>
+                        </div>
+                    </div>
+
+                    {canEdit && (
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                            {activeCuadrilla && turnosCatalogo.length > 0 && (
+                                <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5">
+                                    <span className="text-[10px] font-black uppercase text-slate-400">
+                                        Guardia de {activeCuadrilla.nombre}:
+                                    </span>
+                                    <select
+                                        value={activeCuadrilla.turno_actual_id || ''}
+                                        onChange={e => handleChangeSquadTurn(activeCuadrilla.id, e.target.value)}
+                                        className="bg-transparent text-xs font-black text-amber-400 outline-none cursor-pointer"
+                                    >
+                                        {turnosCatalogo.map(t => (
+                                            <option key={t.id} value={t.id} className="bg-slate-900 text-white">
+                                                {t.codigo === 'T1' ? '☀️ ' : t.codigo === 'T2' ? '🌙 ' : t.codigo === 'DESC' ? '🏠 ' : '⚙️ '}
+                                                {t.nombre}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
+                            <button
+                                type="button"
+                                onClick={handleRotate14x7Cycle}
+                                disabled={rotating14x7}
+                                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-lg shadow-cyan-950/50 transition-all cursor-pointer disabled:opacity-50"
+                                title="Rota automáticamente las cuadrillas: Descanso -> Día -> Noche -> Descanso"
+                            >
+                                <ArrowRightLeft size={14} />
+                                {rotating14x7 ? 'Rotando Guardia 14x7...' : '🔄 Rotar Ciclo Semanal 14×7'}
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                {/* Tarjetas de estado 14x7 por cuadrilla */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 pt-1">
+                    {cuadrillas.map(c => {
+                        const isSelected = c.id === selectedCuadrillaId
+                        const tCode = (c.turno_codigo || 'T1').toUpperCase()
+                        const isDia = tCode === 'T1'
+                        const isNoche = tCode === 'T2'
+                        const isDescanso = tCode === 'DESC'
+
+                        return (
+                            <div
+                                key={c.id}
+                                onClick={() => setSelectedCuadrillaId(c.id)}
+                                className={`p-3 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                                    isSelected
+                                        ? 'bg-slate-800/90 border-amber-500 shadow-md shadow-amber-500/10'
+                                        : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+                                }`}
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-black text-white truncate">{c.nombre}</span>
+                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase shrink-0 border ${
+                                        isDescanso
+                                            ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40'
+                                            : isNoche
+                                            ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                                            : 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                                    }`}>
+                                        {isDescanso ? '🏠 DESCANSO 14×7' : isNoche ? '🌙 TURNO NOCHE' : '☀️ TURNO DÍA'}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between text-[10px] text-slate-400">
+                                    <span className="truncate">
+                                        {c.supervisor_name ? `👷 ${c.supervisor_name}` : 'Sin supervisor'}
+                                    </span>
+                                    <span className="font-bold text-slate-300 shrink-0">
+                                        {isDescanso ? '7d Bajada' : '14d En Mina'}
+                                    </span>
+                                </div>
+                            </div>
+                        )
+                    })}
                 </div>
             </div>
 

@@ -1502,22 +1502,106 @@ export default function AndroidMobileAppPage() {
                                     </div>
                                 </div>
 
+                                {/* Panel de Rol y Guardia Continua 14×7 */}
+                                <div className="bg-slate-900 border-2 border-cyan-500/40 rounded-2xl p-3 space-y-2.5">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div>
+                                            <div className="text-xs font-black text-cyan-400 uppercase flex items-center gap-1.5">
+                                                <span>🔄 ROL MINERO 14×7</span>
+                                                <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-[9px]">
+                                                    14d Mina × 7d Descanso
+                                                </span>
+                                            </div>
+                                            <div className="text-[10px] text-slate-400">
+                                                Guardia Día • Guardia Noche • Semana de Descanso
+                                            </div>
+                                        </div>
+
+                                        {canMoveSquads && (
+                                            <button
+                                                onClick={async () => {
+                                                    const tDia = turnos.find((t: any) => t.codigo === 'T1')
+                                                    const tNoche = turnos.find((t: any) => t.codigo === 'T2')
+                                                    const tDesc = turnos.find((t: any) => t.codigo === 'DESC')
+                                                    if (!tDia || !tNoche || !tDesc) {
+                                                        toast.error('Faltan turnos T1, T2 o DESC en el catálogo.')
+                                                        return
+                                                    }
+                                                    const updates: Array<{ id: string; nextId: string }> = []
+                                                    cuadrillas.forEach((c: any) => {
+                                                        const code = (c.codigo || '').toUpperCase()
+                                                        const curT = c.cat_turnos?.codigo || 'T1'
+                                                        if (code === 'C1' || code === 'C2' || code === 'C3' || curT === 'DESC' || curT === 'T2') {
+                                                            let nextT = tDia.id
+                                                            if (curT === 'T1') nextT = tNoche.id
+                                                            else if (curT === 'T2') nextT = tDesc.id
+                                                            else if (curT === 'DESC') nextT = tDia.id
+                                                            updates.push({ id: c.id, nextId: nextT })
+                                                        }
+                                                    })
+                                                    await Promise.all(
+                                                        updates.map(u =>
+                                                            supabase.from('cat_cuadrillas').update({ turno_actual_id: u.nextId }).eq('id', u.id)
+                                                        )
+                                                    )
+                                                    await loadAllSupabaseData(true)
+                                                    toast.success('🔄 Guardia 14×7 Rotada: Descanso → Día → Noche → Descanso')
+                                                }}
+                                                className="px-2.5 py-1.5 rounded-xl bg-cyan-500 text-slate-950 text-[10px] font-black shrink-0 shadow"
+                                            >
+                                                🔄 Rotar 14×7
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {canMoveSquads && currentSquad && turnos.length > 0 && (
+                                        <div className="flex items-center justify-between gap-2 bg-slate-950 p-2 rounded-xl border border-slate-800">
+                                            <span className="text-[10px] font-bold text-slate-400">
+                                                Guardia de {currentSquad.nombre}:
+                                            </span>
+                                            <select
+                                                value={currentSquad.turno_actual_id || ''}
+                                                onChange={async (e) => {
+                                                    const newId = e.target.value
+                                                    if (!newId) return
+                                                    await supabase
+                                                        .from('cat_cuadrillas')
+                                                        .update({ turno_actual_id: newId })
+                                                        .eq('id', currentSquad.id)
+                                                    await loadAllSupabaseData(true)
+                                                    toast.success(`Guardia 14×7 actualizada para ${currentSquad.nombre}`)
+                                                }}
+                                                className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[11px] font-black text-amber-400 outline-none"
+                                            >
+                                                {turnos.map((t: any) => (
+                                                    <option key={t.id} value={t.id}>
+                                                        {t.codigo === 'T1' ? '☀️ ' : t.codigo === 'T2' ? '🌙 ' : t.codigo === 'DESC' ? '🏠 ' : ''}
+                                                        {t.nombre}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+                                </div>
+
                                 {/* Selector de las 5 Cuadrillas */}
                                 <div className="flex gap-2 overflow-x-auto pb-1">
                                     {cuadrillas.map((sq) => {
                                         const isSel = currentSquad?.id === sq.id
                                         const count = (membersBySquad[sq.id] || []).length
+                                        const tCode = sq.cat_turnos?.codigo || 'T1'
+                                        const shiftIcon = tCode === 'DESC' ? '🏠' : tCode === 'T2' ? '🌙' : '☀️'
                                         return (
                                             <button
                                                 key={sq.id}
                                                 onClick={() => setSelectedSquadId(sq.id)}
-                                                className={`px-3.5 py-2 rounded-xl border text-xs font-black shrink-0 flex items-center gap-2 transition-all ${
+                                                className={`px-3 py-2 rounded-xl border text-xs font-black shrink-0 flex items-center gap-1.5 transition-all ${
                                                     isSel
                                                         ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow'
                                                         : 'bg-slate-900 text-slate-300 border-slate-800'
                                                 }`}
                                             >
-                                                <span>{sq.nombre}</span>
+                                                <span>{shiftIcon} {sq.nombre}</span>
                                                 <span className="px-1.5 py-0.5 rounded bg-slate-950/30 text-[10px]">
                                                     {count}
                                                 </span>
@@ -1537,8 +1621,18 @@ export default function AndroidMobileAppPage() {
                                                 {currentSquadMembers.length} Integrantes en Formación • Semana 38
                                             </div>
                                         </div>
-                                        <span className="px-2 py-0.5 rounded bg-emerald-400 text-slate-950 text-[10px] font-black">
-                                            EN TURNO
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                                            currentSquad?.cat_turnos?.codigo === 'DESC'
+                                                ? 'bg-cyan-400 text-slate-950'
+                                                : currentSquad?.cat_turnos?.codigo === 'T2'
+                                                ? 'bg-indigo-400 text-slate-950'
+                                                : 'bg-amber-400 text-slate-950'
+                                        }`}>
+                                            {currentSquad?.cat_turnos?.codigo === 'DESC'
+                                                ? '🏠 DESCANSO 14×7'
+                                                : currentSquad?.cat_turnos?.codigo === 'T2'
+                                                ? '🌙 TURNO NOCHE'
+                                                : '☀️ TURNO DÍA'}
                                         </span>
                                     </div>
 
