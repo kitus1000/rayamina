@@ -8,12 +8,16 @@ import {
     StyleSheet,
 } from 'react-native'
 import { UserCircle2, Search } from 'lucide-react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useCatalog } from '../../hooks/use-catalog'
 import { useMobileAuth } from '../../lib/auth-context'
+import { useResponsiveLayout } from '../../lib/responsive'
 import MobileShell from '../../components/MobileShell'
 
 export default function PersonnelScreen() {
     const { theme } = useMobileAuth()
+    const insets = useSafeAreaInsets()
+    const { isCompact, horizontalPadding } = useResponsiveLayout()
     const [search, setSearch] = useState('')
     const { data: employees, loading, refresh } = useCatalog<any>(
         'rh_employees',
@@ -90,13 +94,13 @@ export default function PersonnelScreen() {
         )
     }
 
-    return (
-        <MobileShell
-            title={`Fuerza Operativa (${filtered.length})`}
-            pillar="3. Operación Mina"
-            pillarHex="#10B981"
-        >
-            <View style={styles.container}>
+        return (
+            <MobileShell
+                title={`Fuerza Operativa (${filtered.length})`}
+                pillar="3. Operación Mina"
+                pillarHex="#10B981"
+            >
+                <View style={[styles.container, { paddingHorizontal: horizontalPadding }]}>
                 <View
                     style={[
                         styles.searchBox,
@@ -123,7 +127,7 @@ export default function PersonnelScreen() {
                         keyExtractor={(item: any) => item.id}
                         renderItem={renderItem}
                         showsVerticalScrollIndicator={false}
-                        contentContainerStyle={{ paddingBottom: 24 }}
+                        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 18, 24) }}
                         refreshing={loading}
                         onRefresh={refresh}
                     />

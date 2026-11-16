@@ -454,9 +454,9 @@ export default function SemanaEnCursoPage() {
     }
 
     return (
-        <div className="p-6 max-w-[1400px] mx-auto">
+        <div className="p-2 sm:p-4 max-w-full w-full min-w-0 mx-auto">
             {/* HEADER */}
-            <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div className="mb-8 flex flex-col md:flex-row flex-wrap justify-between items-start md:items-center gap-4">
                 <div>
                     <h1 className="text-3xl font-bold text-white flex items-center gap-3">
                         <Target className="text-amber-500 w-8 h-8" />

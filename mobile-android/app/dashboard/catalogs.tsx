@@ -9,8 +9,10 @@ import {
     StyleSheet,
 } from 'react-native'
 import { Pickaxe, MapPin, Building2, Users, Truck, Coins } from 'lucide-react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useCatalog } from '../../hooks/use-catalog'
 import { useMobileAuth } from '../../lib/auth-context'
+import { useResponsiveLayout } from '../../lib/responsive'
 import MobileShell from '../../components/MobileShell'
 
 const TABS = [
@@ -24,6 +26,8 @@ const TABS = [
 
 export default function CatalogsScreen() {
     const { theme } = useMobileAuth()
+    const insets = useSafeAreaInsets()
+    const { horizontalPadding } = useResponsiveLayout()
     const [activeTab, setActiveTab] = useState(TABS[0])
     const { data: records, loading, refresh } = useCatalog<any>(activeTab.table, '*')
 
@@ -105,7 +109,7 @@ export default function CatalogsScreen() {
                     </ScrollView>
                 </View>
 
-                <View style={styles.listWrap}>
+                <View style={[styles.listWrap, { paddingHorizontal: horizontalPadding }]}>
                     {loading ? (
                         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
                             <ActivityIndicator size="large" color="#A855F7" />
@@ -116,7 +120,7 @@ export default function CatalogsScreen() {
                             keyExtractor={(item: any) => item.id}
                             renderItem={renderItem}
                             showsVerticalScrollIndicator={false}
-                            contentContainerStyle={{ paddingBottom: 24 }}
+                            contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 18, 24) }}
                             refreshing={loading}
                             onRefresh={refresh}
                         />

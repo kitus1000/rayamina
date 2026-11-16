@@ -624,7 +624,7 @@ export default function EditDailyReportPage({ params }: { params: Promise<{ id: 
     }
 
     return (
-        <div className="p-6 max-w-7xl mx-auto">
+        <div className="p-2 sm:p-4 max-w-full w-full min-w-0 mx-auto">
             {/* VOLVER */}
             <div className="mb-6">
                 <Link href={`/dashboard/operacion/reportes-diarios/${id}`} className="text-slate-400 hover:text-white flex items-center gap-1 text-sm">

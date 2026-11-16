@@ -1,18 +1,17 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   Animated,
-  Dimensions,
   ScrollView,
   Modal,
   Pressable,
   Easing,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, usePathname } from 'expo-router';
 import {
   Menu,
@@ -34,11 +33,22 @@ import {
   CheckCircle2,
   ShieldCheck,
   RefreshCw,
+  Bell,
+  CheckCheck,
+  ArrowRight,
 } from 'lucide-react-native';
 import { useMobileAuth } from '../lib/auth-context';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const DRAWER_WIDTH = Math.min(315, SCREEN_WIDTH * 0.84);
+import { useResponsiveLayout } from '../lib/responsive';
+import {
+  OpsNotification,
+  doesNotificationMatchUser,
+  fetchAllNotifications,
+  isNotificationRead,
+  mapNotificationLinkToMobileRoute,
+  markAllNotificationsAsRead,
+  markNotificationAsRead,
+  subscribeNotificationsUpdated,
+} from '../lib/notifications-service';
 
 interface NavItem {
   label: string;
@@ -77,6 +87,16 @@ export default function MobileShell({
   const resolvedPillarColor = pillarHex || pillarColor || '#F59E0B';
   const router = useRouter();
   const pathname = usePathname();
+  const insets = useSafeAreaInsets();
+  const {
+    width: screenWidth,
+    height: screenHeight,
+    isCompact,
+    drawerWidth,
+    modalMaxWidth,
+  } = useResponsiveLayout();
+  const safeBottom = Math.max(insets.bottom, 6);
+
   const {
     user,
     loading,
@@ -105,11 +125,61 @@ export default function MobileShell({
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [credentialModalOpen, setCredentialModalOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<OpsNotification[]>([]);
+  const [loadingNotifications, setLoadingNotifications] = useState(false);
   const [syncingViews, setSyncingViews] = useState(false);
 
+  const readerKey = (user?.email || user?.id || '').toLowerCase();
+
+  const loadUserNotifications = useCallback(async () => {
+    if (!user) {
+      setNotifications([]);
+      return;
+    }
+    try {
+      setLoadingNotifications(true);
+      const all = await fetchAllNotifications();
+      const mine = all.filter((n) =>
+        doesNotificationMatchUser(n, {
+          userId: user.id,
+          email: user.email,
+          role: user.raw_role || user.role,
+          fullName: user.full_name,
+        })
+      );
+      setNotifications(mine);
+    } finally {
+      setLoadingNotifications(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    loadUserNotifications();
+    const unsub = subscribeNotificationsUpdated(() => {
+      loadUserNotifications();
+    });
+    const timer = setInterval(loadUserNotifications, 25000);
+    return () => {
+      unsub();
+      clearInterval(timer);
+    };
+  }, [loadUserNotifications]);
+
+  const unreadCount = useMemo(
+    () => notifications.filter((n) => !isNotificationRead(n, readerKey)).length,
+    [notifications, readerKey]
+  );
+
   // Animación del menú desplegable lateral (Slide-out Drawer)
-  const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
+  const slideAnim = useRef(new Animated.Value(-drawerWidth)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!drawerOpen) {
+      slideAnim.setValue(-drawerWidth);
+    }
+  }, [drawerWidth, drawerOpen, slideAnim]);
 
   // Animación de entrada de cada pantalla + barra láser superior
   const contentOpacity = useRef(new Animated.Value(0)).current;
@@ -150,13 +220,13 @@ export default function MobileShell({
         useNativeDriver: true,
       }),
       Animated.timing(laserWidth, {
-        toValue: SCREEN_WIDTH,
+        toValue: screenWidth,
         duration: 420,
         easing: Easing.out(Easing.quad),
         useNativeDriver: false,
       }),
     ]).start();
-  }, [pathname, contentOpacity, contentTranslateY, contentScale, laserWidth]);
+  }, [pathname, screenWidth, contentOpacity, contentTranslateY, contentScale, laserWidth]);
 
   const openDrawer = () => {
     setDrawerOpen(true);
@@ -180,7 +250,7 @@ export default function MobileShell({
   const closeDrawer = (callback?: () => void) => {
     Animated.parallel([
       Animated.timing(slideAnim, {
-        toValue: -DRAWER_WIDTH,
+        toValue: -drawerWidth,
         duration: 200,
         easing: Easing.in(Easing.cubic),
         useNativeDriver: true,
@@ -377,6 +447,8 @@ export default function MobileShell({
           {
             backgroundColor: colors.bgHeader,
             borderBottomColor: colors.border,
+            height: isCompact ? 56 : 64,
+            paddingHorizontal: isCompact ? 10 : 14,
           },
         ]}
       >
@@ -389,10 +461,12 @@ export default function MobileShell({
               {
                 backgroundColor: colors.bgElevated,
                 borderColor: '#F59E0B',
+                width: isCompact ? 38 : 42,
+                height: isCompact ? 38 : 42,
               },
             ]}
           >
-            <Menu size={21} color="#D97706" />
+            <Menu size={isCompact ? 19 : 21} color="#D97706" />
           </TouchableOpacity>
 
           <View style={styles.titleContainer}>
@@ -406,7 +480,10 @@ export default function MobileShell({
               </Text>
             </View>
             <Text
-              style={[styles.screenTitle, { color: colors.textPrimary }]}
+              style={[
+                styles.screenTitle,
+                { color: colors.textPrimary, fontSize: isCompact ? 13.5 : 15 },
+              ]}
               numberOfLines={1}
             >
               {title}
@@ -414,7 +491,7 @@ export default function MobileShell({
           </View>
         </View>
 
-        <View style={styles.topbarRight}>
+        <View style={[styles.topbarRight, { gap: isCompact ? 6 : 8 }]}>
           {/* Insignia de Credencial Verificada (Solo lectura + Sincronización) */}
           <TouchableOpacity
             onPress={() => setCredentialModalOpen(true)}
@@ -424,6 +501,8 @@ export default function MobileShell({
               {
                 backgroundColor: roleMeta.badgeColor + '20',
                 borderColor: roleMeta.badgeColor,
+                maxWidth: isCompact ? 88 : 132,
+                paddingHorizontal: isCompact ? 7 : 10,
               },
             ]}
           >
@@ -434,6 +513,32 @@ export default function MobileShell({
             >
               {roleMeta.shortLabel}
             </Text>
+          </TouchableOpacity>
+
+          {/* Campana de Notificaciones */}
+          <TouchableOpacity
+            onPress={() => {
+              loadUserNotifications();
+              setNotificationsOpen(true);
+            }}
+            activeOpacity={0.8}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            style={[
+              styles.themeBtn,
+              {
+                backgroundColor: unreadCount > 0 ? 'rgba(245, 158, 11, 0.16)' : colors.bgElevated,
+                borderColor: unreadCount > 0 ? '#F59E0B' : colors.border,
+              },
+            ]}
+          >
+            <Bell size={16} color={unreadCount > 0 ? '#D97706' : colors.textSecondary} />
+            {unreadCount > 0 && (
+              <View style={styles.bellBadge}>
+                <Text style={styles.bellBadgeText}>
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
 
           {/* Conmutador Día / Noche */}
@@ -529,13 +634,16 @@ export default function MobileShell({
         )}
       </Animated.View>
 
-      {/* BARRA INFERIOR DE ACCESO RÁPIDO (SOLO VISTAS AUTORIZADAS) */}
+      {/* BARRA INFERIOR DE ACCESO RÁPIDO PROTEGIDA CON SAFE-AREA PARA ANDROID NAVIGATION BAR */}
       <View
         style={[
           styles.bottomBar,
           {
             backgroundColor: colors.bgHeader,
             borderTopColor: colors.border,
+            paddingBottom: safeBottom,
+            paddingTop: 6,
+            minHeight: (isCompact ? 56 : 62) + safeBottom,
           },
         ]}
       >
@@ -548,15 +656,31 @@ export default function MobileShell({
               <TouchableOpacity
                 key={tab.href}
                 activeOpacity={0.85}
+                hitSlop={{ top: 10, bottom: 8, left: 6, right: 6 }}
                 onPress={() => {
                   if (pathname !== tab.href) router.push(tab.href as any);
                 }}
                 style={styles.primaryTabBtn}
               >
-                <View style={styles.primaryTabCircle}>
-                  <IconComp size={23} color="#0F172A" />
+                <View
+                  style={[
+                    styles.primaryTabCircle,
+                    {
+                      width: isCompact ? 38 : 42,
+                      height: isCompact ? 38 : 42,
+                      borderRadius: 21,
+                    },
+                  ]}
+                >
+                  <IconComp size={isCompact ? 19 : 21} color="#0F172A" />
                 </View>
-                <Text style={[styles.primaryTabLabel, { color: '#D97706' }]}>
+                <Text
+                  style={[
+                    styles.primaryTabLabel,
+                    { color: '#D97706', fontSize: isCompact ? 9 : 10 },
+                  ]}
+                  numberOfLines={1}
+                >
                   {tab.label}
                 </Text>
               </TouchableOpacity>
@@ -567,13 +691,14 @@ export default function MobileShell({
             <TouchableOpacity
               key={tab.href}
               activeOpacity={0.75}
+              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
               onPress={() => {
                 if (pathname !== tab.href) router.push(tab.href as any);
               }}
               style={styles.tabItem}
             >
               <IconComp
-                size={20}
+                size={isCompact ? 18 : 20}
                 color={isActive ? '#D97706' : colors.textMuted}
               />
               <Text
@@ -582,8 +707,10 @@ export default function MobileShell({
                   {
                     color: isActive ? '#D97706' : colors.textMuted,
                     fontWeight: isActive ? '900' : '600',
+                    fontSize: isCompact ? 9 : 10,
                   },
                 ]}
+                numberOfLines={1}
               >
                 {tab.label}
               </Text>
@@ -615,7 +742,7 @@ export default function MobileShell({
             style={[
               styles.drawerContainer,
               {
-                width: DRAWER_WIDTH,
+                width: drawerWidth,
                 backgroundColor: colors.bgCard,
                 borderRightColor: colors.border,
                 transform: [{ translateX: slideAnim }],
@@ -920,13 +1047,17 @@ export default function MobileShell({
         animationType="fade"
         onRequestClose={() => setCredentialModalOpen(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, { paddingBottom: Math.max(insets.bottom, 18) }]}>
           <View
             style={[
               styles.modalCard,
               {
                 backgroundColor: colors.bgCard,
                 borderColor: '#10B981',
+                maxWidth: modalMaxWidth,
+                width: '100%',
+                alignSelf: 'center',
+                maxHeight: screenHeight * 0.85,
               },
             ]}
           >
@@ -1042,6 +1173,142 @@ export default function MobileShell({
                 </>
               )}
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL CENTRO DE NOTIFICACIONES OPERATIVAS */}
+      <Modal
+        visible={notificationsOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNotificationsOpen(false)}
+      >
+        <View style={[styles.modalOverlay, { paddingBottom: Math.max(insets.bottom, 18) }]}>
+          <View
+            style={[
+              styles.modalCard,
+              {
+                backgroundColor: colors.bgCard,
+                borderColor: '#F59E0B',
+                maxWidth: modalMaxWidth,
+                width: '100%',
+                alignSelf: 'center',
+                maxHeight: screenHeight * 0.86,
+              },
+            ]}
+          >
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <View style={styles.modalVerifiedPill}>
+                  <Bell size={13} color="#F59E0B" />
+                  <Text style={[styles.modalVerifiedPillText, { color: '#F59E0B' }]}>
+                    AVISOS EN TIEMPO REAL ({unreadCount} NUEVOS)
+                  </Text>
+                </View>
+                <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+                  Centro de Alertas Operativas
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setNotificationsOpen(false)}
+                style={[
+                  styles.closeDrawerBtn,
+                  { backgroundColor: colors.bgElevated, borderColor: colors.border },
+                ]}
+              >
+                <X size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {unreadCount > 0 && (
+              <TouchableOpacity
+                onPress={async () => {
+                  const ids = notifications.map((n) => n.id);
+                  await markAllNotificationsAsRead(ids, readerKey);
+                  await loadUserNotifications();
+                }}
+                style={[
+                  styles.restrictedSyncBtn,
+                  { borderColor: '#F59E0B', marginBottom: 10, paddingVertical: 8 },
+                ]}
+              >
+                <CheckCheck size={14} color="#F59E0B" />
+                <Text style={styles.restrictedSyncBtnText}>MARCAR TODAS COMO LEÍDAS</Text>
+              </TouchableOpacity>
+            )}
+
+            <ScrollView
+              style={{ maxHeight: Math.min(400, screenHeight * 0.55) }}
+              showsVerticalScrollIndicator={false}
+            >
+              {loadingNotifications ? (
+                <ActivityIndicator size="small" color="#F59E0B" style={{ marginVertical: 20 }} />
+              ) : notifications.length === 0 ? (
+                <View style={{ paddingVertical: 26, alignItems: 'center' }}>
+                  <Bell size={28} color={colors.textMuted} />
+                  <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 8, textAlign: 'center' }}>
+                    Sin notificaciones operativas pendientes para tu usuario.
+                  </Text>
+                </View>
+              ) : (
+                notifications.map((n) => {
+                  const read = isNotificationRead(n, readerKey);
+                  return (
+                    <TouchableOpacity
+                      key={n.id}
+                      activeOpacity={0.8}
+                      onPress={async () => {
+                        await markNotificationAsRead(n.id, readerKey);
+                        setNotificationsOpen(false);
+                        const target = mapNotificationLinkToMobileRoute(n.link);
+                        if (isApkRouteAllowed(target)) {
+                          router.push(target as any);
+                        }
+                      }}
+                      style={[
+                        styles.notifItemCard,
+                        {
+                          backgroundColor: read ? colors.bgElevated : 'rgba(245, 158, 11, 0.12)',
+                          borderColor: read ? colors.border : '#F59E0B',
+                        },
+                      ]}
+                    >
+                      <View style={styles.notifTopRow}>
+                        <Text
+                          style={[
+                            styles.notifTitle,
+                            { color: colors.textPrimary },
+                          ]}
+                          numberOfLines={2}
+                        >
+                          {n.title}
+                        </Text>
+                        {!read && <View style={styles.notifUnreadDot} />}
+                      </View>
+                      <Text style={[styles.notifBody, { color: colors.textSecondary }]}>
+                        {n.message}
+                      </Text>
+                      {Array.isArray(n.details) && n.details.length > 0 && (
+                        <View style={styles.notifDetailsBox}>
+                          {n.details.slice(0, 5).map((d, idx) => (
+                            <Text key={idx} style={[styles.notifDetailLine, { color: colors.textPrimary }]}>
+                              • {d}
+                            </Text>
+                          ))}
+                        </View>
+                      )}
+                      <View style={styles.notifFooterRow}>
+                        <Text style={{ color: colors.textMuted, fontSize: 9, fontWeight: '700' }}>
+                          {n.created_by_name} • {new Date(n.created_at).toLocaleString()}
+                        </Text>
+                        <ArrowRight size={13} color="#D97706" />
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1202,22 +1469,25 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   bottomBar: {
-    height: 68,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
     borderTopWidth: 1,
-    paddingHorizontal: 6,
+    paddingHorizontal: 4,
+    elevation: 16,
+    zIndex: 30,
   },
   tabItem: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+    minWidth: 0,
   },
   tabLabel: {
     fontSize: 10,
-    marginTop: 3,
+    marginTop: 2,
   },
   activeTabDot: {
     width: 16,
@@ -1227,25 +1497,87 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   primaryTabBtn: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: -18,
+    paddingVertical: 2,
+    paddingHorizontal: 2,
+    minWidth: 0,
   },
   primaryTabCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
     backgroundColor: '#F59E0B',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: '#FFFFFF',
-    elevation: 6,
+    elevation: 4,
   },
   primaryTabLabel: {
     fontSize: 10,
     fontWeight: '900',
     marginTop: 2,
+  },
+  bellBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  bellBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  notifItemCard: {
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  notifTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 4,
+  },
+  notifTitle: {
+    flex: 1,
+    fontSize: 12.5,
+    fontWeight: '900',
+  },
+  notifUnreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#F59E0B',
+  },
+  notifBody: {
+    fontSize: 11.5,
+    lineHeight: 16,
+  },
+  notifDetailsBox: {
+    marginTop: 6,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(148, 163, 184, 0.25)',
+    gap: 2,
+  },
+  notifDetailLine: {
+    fontSize: 10.5,
+    fontWeight: '700',
+  },
+  notifFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
   },
   drawerContainer: {
     position: 'absolute',

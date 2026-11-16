@@ -10,6 +10,7 @@ import {
     TextInput,
     StyleSheet,
 } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import {
     Calendar as CalendarIcon,
@@ -26,6 +27,13 @@ import {
 } from 'lucide-react-native'
 import { supabase } from '../../lib/supabase'
 import { useMobileAuth } from '../../lib/auth-context'
+import { useResponsiveLayout } from '../../lib/responsive'
+import {
+    getSquadSupervisorsMeta,
+    saveReportCreatorMeta,
+    appendReportRevision,
+    pushNotification,
+} from '../../lib/notifications-service'
 import MobileShell from '../../components/MobileShell'
 
 type WizardStep = 'HEADER' | 'ATTENDANCE' | 'ACTIVITIES' | 'SUMMARY'
@@ -58,6 +66,8 @@ type ActivityItem = {
 export default function NewReportWizard() {
     const router = useRouter()
     const { user, sysRole, theme } = useMobileAuth()
+    const insets = useSafeAreaInsets()
+    const { height: screenHeight, isTablet, modalMaxWidth } = useResponsiveLayout()
     const [currentStep, setCurrentStep] = useState<WizardStep>('HEADER')
     const [loading, setLoading] = useState(false)
 
@@ -257,6 +267,11 @@ export default function NewReportWizard() {
     const submitReportToSupabase = async () => {
         setLoading(true)
         try {
+            const squadRow = cuadrillas.find((c) => c.id === selectedCuadrilla)
+            const supMetaMap = await getSquadSupervisorsMeta()
+            const squadSupMeta = supMetaMap[selectedCuadrilla]
+            const resolvedSupId = squadRow?.supervisor_id || squadSupMeta?.supervisor_employee_id || null
+
             // 1. Insertar Reporte Diario Maestro
             const { data: repData, error: repError } = await supabase
                 .from('ops_daily_reports')
@@ -266,7 +281,7 @@ export default function NewReportWizard() {
                         turno_id: selectedTurno,
                         cuadrilla_id: selectedCuadrilla,
                         mine_site_id: selectedMina,
-                        supervisor_id: null,
+                        supervisor_id: resolvedSupId,
                         estado: 'EN_REVISION',
                         status: 'EN_REVISION',
                         observaciones_generales: supervisorComments,
@@ -370,9 +385,48 @@ export default function NewReportWizard() {
                 )
             }
 
+            const actorName = user?.full_name || user?.nickname || sysRole
+            const cuadObjNotif = cuadrillas.find((c) => c.id === selectedCuadrilla)
+            const turnoObjNotif = turnos.find((t) => t.id === selectedTurno)
+
+            await saveReportCreatorMeta(reportId, {
+                creator_user_id: user?.id || null,
+                creator_email: user?.email || null,
+                creator_name: actorName,
+                creator_role: user?.raw_role || sysRole,
+                cuadrilla_id: selectedCuadrilla,
+                supervisor_employee_id: resolvedSupId,
+                supervisor_name: squadSupMeta?.supervisor_employee_name || actorName,
+                supervisor_user_email: squadSupMeta?.supervisor_user_email || user?.email || null,
+            })
+
+            await appendReportRevision(reportId, {
+                edited_by_name: actorName,
+                edited_by_email: user?.email || null,
+                edited_by_role: user?.raw_role || sysRole,
+                approved_with_changes: false,
+                changes: [`Reporte capturado y enviado a revisión desde APK (${activities.length} avances, ${attendanceList.length} asistencias)`],
+                note: supervisorComments.trim() || undefined,
+            })
+
+            await pushNotification({
+                type: 'REPORT_SUBMITTED',
+                title: `📋 Nuevo Reporte para Revisión (${fecha})`,
+                message: `${actorName} envió reporte de ${cuadObjNotif?.nombre || 'Cuadrilla'} (${turnoObjNotif?.nombre || 'Turno'}) para aprobación.`,
+                details: [
+                    `Fecha: ${fecha}`,
+                    `Asistencia: ${attendanceList.length} integrantes`,
+                    `Actividades: ${activities.length} registros de avance`,
+                ],
+                target_roles: ['JEFE_PLANEACION', 'GERENTE', 'SUPERINTENDENTE', 'DIRECTOR_OPERATIVO', 'SUPER_ADMIN'],
+                created_by_name: actorName,
+                created_by_email: user?.email || null,
+                link: `/dashboard/operacion/reportes-diarios/${reportId}`,
+            })
+
             Alert.alert(
                 '¡Reporte Subido a Supabase!',
-                'El reporte diario, asistencia y avances ya están sincronizados con la plataforma web y Pre-Nómina.'
+                'El reporte diario, asistencia y avances ya fueron enviados para revisión y aprobación en Planeación/Gerencia.'
             )
             router.replace('/dashboard/reports')
         } catch (err: any) {
@@ -806,16 +860,25 @@ export default function NewReportWizard() {
             </ScrollView>
 
             {/* BARRA FLOTANTE INFERIOR DEL ASISTENTE */}
-            <View style={[styles.footerBar, { backgroundColor: bgCard, borderTopColor: borderCol }]}>
+            <View
+                style={[
+                    styles.footerBar,
+                    {
+                        backgroundColor: bgCard,
+                        borderTopColor: borderCol,
+                        paddingBottom: Math.max(insets.bottom, 10),
+                    },
+                ]}
+            >
                 <TouchableOpacity onPress={handleBackStep} style={styles.backBtn}>
                     <ChevronLeft size={18} color={textPrimary} />
                     <Text style={[styles.backBtnText, { color: textPrimary }]}>Atrás</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity onPress={handleNextStep} style={styles.nextBtn}>
-                    <Text style={styles.nextBtnText}>
+                    <Text style={styles.nextBtnText} numberOfLines={1}>
                         {currentStep === 'SUMMARY'
-                            ? 'SUBIR REPORTE A SUPABASE'
+                            ? 'ENVIAR A REVISIÓN'
                             : 'Siguiente Paso'}
                     </Text>
                     {currentStep === 'SUMMARY' ? (
@@ -832,9 +895,18 @@ export default function NewReportWizard() {
                     <View
                         style={[
                             styles.modalCard,
-                            { backgroundColor: bgCard, borderColor: borderCol },
+                            {
+                                backgroundColor: bgCard,
+                                borderColor: borderCol,
+                                maxHeight: screenHeight * 0.85,
+                                maxWidth: isTablet ? modalMaxWidth : '100%',
+                                width: '100%',
+                                alignSelf: 'center',
+                                paddingBottom: Math.max(insets.bottom + 14, 24),
+                            },
                         ]}
                     >
+                        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                         <View style={styles.modalHeader}>
                             <Text style={[styles.sectionTitle, { color: textPrimary }]}>
                                 Registrar Avance Operativo
@@ -943,6 +1015,7 @@ export default function NewReportWizard() {
                         <TouchableOpacity onPress={saveActivity} style={styles.saveActBtn}>
                             <Text style={styles.saveActBtnText}>AGREGAR AL REPORTE</Text>
                         </TouchableOpacity>
+                        </ScrollView>
                     </View>
                 </View>
             </Modal>

@@ -27,10 +27,13 @@ import {
 } from 'lucide-react-native'
 import { supabase } from '../../lib/supabase'
 import { useMobileAuth, ROLE_META } from '../../lib/auth-context'
+import { useResponsiveLayout } from '../../lib/responsive'
 import MobileShell from '../../components/MobileShell'
 
 export default function DashboardScreen() {
     const router = useRouter()
+    const { isCompact, isTablet, cardWidth } = useResponsiveLayout()
+    const kpiColWidth = cardWidth(10, isTablet ? 4 : 2)
     const {
         user,
         sysRole,
@@ -258,13 +261,13 @@ export default function DashboardScreen() {
                             <View
                                 style={[
                                     styles.kpiCard,
-                                    { backgroundColor: bgCard, borderColor: borderCol },
+                                    { backgroundColor: bgCard, borderColor: borderCol, width: kpiColWidth },
                                 ]}
                             >
                                 <View style={[styles.kpiIconBox, { backgroundColor: '#F59E0B20' }]}>
-                                    <Truck size={20} color="#D97706" />
+                                    <Truck size={isCompact ? 18 : 20} color="#D97706" />
                                 </View>
-                                <Text style={[styles.kpiValue, { color: textPrimary }]}>
+                                <Text style={[styles.kpiValue, { color: textPrimary, fontSize: isCompact ? 18 : 22 }]}>
                                     {metrics.totalTons.toLocaleString()} t
                                 </Text>
                                 <Text style={[styles.kpiTitle, { color: textSecondary }]}>
@@ -276,13 +279,13 @@ export default function DashboardScreen() {
                             <View
                                 style={[
                                     styles.kpiCard,
-                                    { backgroundColor: bgCard, borderColor: borderCol },
+                                    { backgroundColor: bgCard, borderColor: borderCol, width: kpiColWidth },
                                 ]}
                             >
                                 <View style={[styles.kpiIconBox, { backgroundColor: '#3B82F620' }]}>
-                                    <Pickaxe size={20} color="#2563EB" />
+                                    <Pickaxe size={isCompact ? 18 : 20} color="#2563EB" />
                                 </View>
-                                <Text style={[styles.kpiValue, { color: textPrimary }]}>
+                                <Text style={[styles.kpiValue, { color: textPrimary, fontSize: isCompact ? 18 : 22 }]}>
                                     {metrics.totalMeters} m
                                 </Text>
                                 <Text style={[styles.kpiTitle, { color: textSecondary }]}>
@@ -296,13 +299,13 @@ export default function DashboardScreen() {
                                     onPress={() => router.push('/dashboard/payroll')}
                                     style={[
                                         styles.kpiCard,
-                                        { backgroundColor: bgCard, borderColor: '#10B98160' },
+                                        { backgroundColor: bgCard, borderColor: '#10B98160', width: kpiColWidth },
                                     ]}
                                 >
                                     <View style={[styles.kpiIconBox, { backgroundColor: '#10B98120' }]}>
-                                        <DollarSign size={20} color="#059669" />
+                                        <DollarSign size={isCompact ? 18 : 20} color="#059669" />
                                     </View>
-                                    <Text style={[styles.kpiValue, { color: '#059669' }]}>
+                                    <Text style={[styles.kpiValue, { color: '#059669', fontSize: isCompact ? 18 : 22 }]}>
                                         ${(metrics.estimatedPayroll / 1000).toFixed(1)}k
                                     </Text>
                                     <Text style={[styles.kpiTitle, { color: textSecondary }]}>
@@ -314,13 +317,13 @@ export default function DashboardScreen() {
                                 <View
                                     style={[
                                         styles.kpiCard,
-                                        { backgroundColor: bgCard, borderColor: borderCol },
+                                        { backgroundColor: bgCard, borderColor: borderCol, width: kpiColWidth },
                                     ]}
                                 >
                                     <View style={[styles.kpiIconBox, { backgroundColor: '#10B98120' }]}>
-                                        <Users size={20} color="#059669" />
+                                        <Users size={isCompact ? 18 : 20} color="#059669" />
                                     </View>
-                                    <Text style={[styles.kpiValue, { color: textPrimary }]}>
+                                    <Text style={[styles.kpiValue, { color: textPrimary, fontSize: isCompact ? 18 : 22 }]}>
                                         {metrics.activeWorkers}
                                     </Text>
                                     <Text style={[styles.kpiTitle, { color: textSecondary }]}>

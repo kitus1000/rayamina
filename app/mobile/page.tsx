@@ -2378,7 +2378,10 @@ export default function AndroidMobileAppPage() {
             </main>
 
             {/* BARRA INFERIOR DE NAVEGACIÓN ESTILO ANDROID NATIVO (FILTRADA SEGÚN VISTAS ASIGNADAS) */}
-            <nav className="h-16 bg-slate-900 border-t border-slate-800 fixed bottom-0 left-0 right-0 max-w-md mx-auto z-30 flex items-center justify-around px-2 shadow-2xl">
+            <nav
+                style={{ paddingBottom: 'max(0.35rem, env(safe-area-inset-bottom))' }}
+                className="min-h-16 bg-slate-900 border-t border-slate-800 fixed bottom-0 left-0 right-0 max-w-md mx-auto z-30 flex items-center justify-around px-2 pt-1.5 shadow-2xl"
+            >
                 {[
                     { id: 'HOME' as MobileScreenId, label: 'Mando', icon: LayoutDashboard },
                     { id: 'SQUADS' as MobileScreenId, label: 'Cuadrillas', icon: Users },
@@ -2400,7 +2403,7 @@ export default function AndroidMobileAppPage() {
                             <button
                                 key={tab.id}
                                 onClick={() => navigateToScreen(tab.id)}
-                                className="flex flex-col items-center justify-center -mt-5"
+                                className="flex flex-col items-center justify-center -mt-2"
                             >
                                 <div className="w-12 h-12 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center shadow-lg border-2 border-white">
                                     <IconComp size={22} />

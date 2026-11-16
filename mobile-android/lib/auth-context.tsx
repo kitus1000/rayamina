@@ -150,7 +150,7 @@ export function resolveEffectiveViews(role: MobileRole, viewsJson?: string[] | n
   if (role === 'SUPER_ADMIN') {
     return DEFAULT_ROLE_VIEWS.SUPER_ADMIN;
   }
-  if (Array.isArray(viewsJson) && viewsJson.length > 0) {
+  if (Array.isArray(viewsJson)) {
     return viewsJson;
   }
   return DEFAULT_ROLE_VIEWS[role] || DEFAULT_ROLE_VIEWS.SUPERVISOR;
@@ -167,6 +167,11 @@ export function checkApkRouteAllowed(
   const clean = apkHref.split('?')[0].replace(/\/+$/, '') || '/dashboard';
   const hasPrefix = (prefix: string) =>
     allowedViews.some((v) => v === prefix || v.startsWith(prefix + '/'));
+  const hasExplicitCatalogChildren = allowedViews.some((v) =>
+    v.startsWith('/dashboard/catalogos/')
+  );
+  const allowCatalogHubFallback =
+    allowedViews.includes('/dashboard/catalogos') && !hasExplicitCatalogChildren;
 
   switch (clean) {
     case '/dashboard':
@@ -176,15 +181,9 @@ export function checkApkRouteAllowed(
     case '/dashboard/planning':
       return hasPrefix('/dashboard/semana');
     case '/dashboard/squads':
-      return (
-        allowedViews.includes('/dashboard/catalogos') ||
-        hasPrefix('/dashboard/catalogos/cuadrillas')
-      );
+      return allowCatalogHubFallback || hasPrefix('/dashboard/catalogos/cuadrillas');
     case '/dashboard/personnel':
-      return (
-        allowedViews.includes('/dashboard/catalogos') ||
-        hasPrefix('/dashboard/catalogos/empleados')
-      );
+      return allowCatalogHubFallback || hasPrefix('/dashboard/catalogos/empleados');
     case '/dashboard/reports':
     case '/dashboard/reports-new':
       return hasPrefix('/dashboard/operacion/reportes-diarios');
@@ -192,7 +191,7 @@ export function checkApkRouteAllowed(
       return hasPrefix('/dashboard/chat');
     case '/dashboard/catalogs':
       return (
-        allowedViews.includes('/dashboard/catalogos') ||
+        allowCatalogHubFallback ||
         hasPrefix('/dashboard/catalogos/ubicaciones') ||
         hasPrefix('/dashboard/catalogos/productos-mina')
       );
@@ -309,12 +308,18 @@ export const MobileAuthProvider = ({ children }: { children: React.ReactNode }) 
         const mappedRole = normalizeMobileRole(sysData.role);
         const effectiveViews = resolveEffectiveViews(
           mappedRole,
-          Array.isArray(sysData.views_json) ? sysData.views_json : []
+          Array.isArray(sysData.views_json) ? sysData.views_json : null
         );
 
         let perms = {
-          can_approve_reports: ['SUPER_ADMIN', 'SUPERINTENDENTE', 'GERENTE'].includes(mappedRole),
-          can_edit_approved: ['SUPER_ADMIN', 'GERENTE'].includes(mappedRole),
+          can_approve_reports: [
+            'SUPER_ADMIN',
+            'DIRECTOR_OPERATIVO',
+            'GERENTE',
+            'SUPERINTENDENTE',
+            'JEFE_PLANEACION',
+          ].includes(mappedRole),
+          can_edit_approved: ['SUPER_ADMIN', 'GERENTE', 'DIRECTOR_OPERATIVO'].includes(mappedRole),
         };
 
         const { data: roleCfg } = await supabase
@@ -482,7 +487,12 @@ export const MobileAuthProvider = ({ children }: { children: React.ReactNode }) 
     'SUPERINTENDENTE',
   ].includes(sysRole);
 
-  const canMoveSquads = ['SUPER_ADMIN', 'GERENTE', 'SUPERINTENDENTE'].includes(sysRole);
+  const canMoveSquads = [
+    'SUPER_ADMIN',
+    'DIRECTOR_OPERATIVO',
+    'GERENTE',
+    'SUPERINTENDENTE',
+  ].includes(sysRole);
   const canEditPlanning = [
     'SUPER_ADMIN',
     'JEFE_PLANEACION',
@@ -490,8 +500,13 @@ export const MobileAuthProvider = ({ children }: { children: React.ReactNode }) 
     'GERENTE',
   ].includes(sysRole);
   const canApproveReports =
-    ['SUPER_ADMIN', 'SUPERINTENDENTE', 'GERENTE'].includes(sysRole) ||
-    !!user?.permissions?.can_approve_reports;
+    [
+      'SUPER_ADMIN',
+      'DIRECTOR_OPERATIVO',
+      'GERENTE',
+      'SUPERINTENDENTE',
+      'JEFE_PLANEACION',
+    ].includes(sysRole) || !!user?.permissions?.can_approve_reports;
 
   // Protección estricta de precios, toneladas financieras y nómina según vistas asignadas
   const canViewFinancials =

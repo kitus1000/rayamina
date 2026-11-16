@@ -9,12 +9,16 @@ import {
     StyleSheet,
 } from 'react-native'
 import { DollarSign, Lock, Search, Users, Award, CheckCircle2 } from 'lucide-react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { supabase } from '../../lib/supabase'
 import { useMobileAuth } from '../../lib/auth-context'
+import { useResponsiveLayout } from '../../lib/responsive'
 import MobileShell from '../../components/MobileShell'
 
 export default function MobilePayrollScreen() {
     const { sysRole, theme, canViewFinancials } = useMobileAuth()
+    const insets = useSafeAreaInsets()
+    const { isCompact, horizontalPadding } = useResponsiveLayout()
     const [loading, setLoading] = useState(true)
     const [rows, setRows] = useState<any[]>([])
     const [search, setSearch] = useState('')
@@ -142,8 +146,8 @@ export default function MobilePayrollScreen() {
                 </View>
             ) : (
                 <ScrollView
-                    style={styles.scroll}
-                    contentContainerStyle={{ paddingBottom: 36 }}
+                    style={[styles.scroll, { paddingHorizontal: horizontalPadding }]}
+                    contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 20, 36) }}
                     showsVerticalScrollIndicator={false}
                 >
                     {/* RESUMEN EJECUTIVO DE RAYA SEMANA 38 */}
@@ -156,7 +160,7 @@ export default function MobilePayrollScreen() {
                         <Text style={styles.summaryTag}>
                             💰 CORTE PRE-NÓMINA SEMANA 38 (21-27 SEP 2026)
                         </Text>
-                        <Text style={styles.summaryTotal}>
+                        <Text style={[styles.summaryTotal, isCompact && { fontSize: 22 }]}>
                             ${totals.total.toLocaleString('es-MX')} MXN
                         </Text>
                         <View style={styles.summarySplitRow}>
@@ -345,7 +349,9 @@ const styles = StyleSheet.create({
     },
     breakdownRow: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         justifyContent: 'space-between',
+        gap: 6,
         marginTop: 8,
         paddingTop: 8,
         borderTopWidth: 1,

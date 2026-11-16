@@ -95,7 +95,7 @@ export default function TarifasConfigPage() {
     )
 
     return (
-        <div className="p-6 max-w-6xl mx-auto">
+        <div className="p-2 sm:p-4 max-w-full w-full min-w-0 mx-auto">
             <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h1 className="text-3xl font-bold text-white flex items-center gap-3">
@@ -106,7 +106,7 @@ export default function TarifasConfigPage() {
             </div>
 
             {/* TAB SELECTOR */}
-            <div className="flex gap-4 mb-6">
+            <div className="flex flex-wrap gap-3 mb-6">
                 <button
                     onClick={() => setActiveTab('EMPLEADOS')}
                     className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 ${activeTab === 'EMPLEADOS' ? 'bg-green-600 text-white shadow-lg shadow-green-900/40' : 'bg-slate-900 text-slate-400 hover:bg-slate-800'}`}
@@ -121,8 +121,8 @@ export default function TarifasConfigPage() {
                 </button>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
-                <div className="flex justify-between items-center mb-6">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-2xl">
+                <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 mb-6">
                     {/* SEARCHBAR */}
                     <div className="relative w-full max-w-md">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />

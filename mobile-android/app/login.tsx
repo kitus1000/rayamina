@@ -12,6 +12,7 @@ import {
   Animated,
   Easing,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
   HardHat,
@@ -24,9 +25,13 @@ import {
   AlertTriangle,
 } from 'lucide-react-native';
 import { useMobileAuth } from '../lib/auth-context';
+import { useResponsiveLayout } from '../lib/responsive';
 
 export default function LoginScreen() {
   const { user, theme, loginWithCredentials, getFirstAllowedApkRoute } = useMobileAuth();
+  const insets = useSafeAreaInsets();
+  const { width, isCompact, isTablet } = useResponsiveLayout();
+  const cardWidth = isTablet ? Math.min(460, width * 0.72) : Math.max(280, width - (isCompact ? 24 : 40));
   const isLight = theme === 'light';
   const colors = {
     bgMain: isLight ? '#F8FAFC' : '#020617',
@@ -130,7 +135,7 @@ export default function LoginScreen() {
 
   const laserTranslateX = laserSweep.interpolate({
     inputRange: [0, 1],
-    outputRange: [-120, 240],
+    outputRange: [-110, Math.max(200, cardWidth)],
   });
 
   return (
@@ -139,7 +144,14 @@ export default function LoginScreen() {
       style={[styles.container, { backgroundColor: colors.bgMain }]}
     >
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          {
+            paddingHorizontal: isCompact ? 12 : 20,
+            paddingTop: Math.max(insets.top + 16, 28),
+            paddingBottom: Math.max(insets.bottom + 20, 28),
+          },
+        ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -147,6 +159,9 @@ export default function LoginScreen() {
           style={{
             opacity: fadeAnim,
             transform: [{ translateY: slideAnim }],
+            width: '100%',
+            maxWidth: cardWidth,
+            alignSelf: 'center',
           }}
         >
           {/* CABECERA CORPORATIVA BLINDADA */}

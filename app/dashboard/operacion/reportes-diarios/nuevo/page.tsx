@@ -520,7 +520,7 @@ export default function DailyReportsPage() {
 
     // --- RENDER ---
     return (
-        <div className="p-6 max-w-7xl mx-auto">
+        <div className="p-2 sm:p-4 max-w-full w-full min-w-0 mx-auto">
             {/* HEADER */}
             <div className="mb-8">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -530,14 +530,14 @@ export default function DailyReportsPage() {
                     </div>
                     <button
                         onClick={() => window.location.href = '/dashboard/operacion/reportes-diarios'}
-                        className="px-4 py-2 border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors font-medium text-sm"
+                        className="px-4 py-2 border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors font-medium text-sm shrink-0"
                     >
                         Cancelar y Volver
                     </button>
                 </div>
 
                 {/* WIZARD STEPS */}
-                <div className="flex items-center gap-4 mt-6 text-sm">
+                <div className="flex flex-wrap items-center gap-3 sm:gap-4 mt-6 text-sm">
                     <div className={`flex items-center gap-2 ${currentStep === 'HEADER' ? 'text-amber-500 font-bold' : 'text-slate-500'}`}>
                         <div className="w-6 h-6 rounded-full border border-current flex items-center justify-center">1</div>
                         <span>Encabezado</span>

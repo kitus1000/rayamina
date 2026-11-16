@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import {
     View,
     Text,
@@ -10,36 +10,55 @@ import {
     Animated,
     StyleSheet,
 } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
     Users,
     Pickaxe,
     Shield,
-    Truck,
-    ArrowRightLeft,
     History,
     Lock,
     CheckCircle2,
     UserPlus,
     UserMinus,
+    UserCheck,
     X,
 } from 'lucide-react-native'
 import { supabase } from '../../lib/supabase'
 import { useMobileAuth } from '../../lib/auth-context'
+import { useResponsiveLayout } from '../../lib/responsive'
+import {
+    getSquadSupervisorsMeta,
+    saveSquadSupervisorMeta,
+    pushNotification,
+    SquadSupervisorMeta,
+} from '../../lib/notifications-service'
 import MobileShell from '../../components/MobileShell'
 
 const SQUAD_HISTORY_KEY = 'ops_squad_history_store'
 
 export default function MobileSquadsScreen() {
     const { sysRole, user, theme, canMoveSquads } = useMobileAuth()
+    const insets = useSafeAreaInsets()
+    const { height: screenHeight, isCompact, isTablet, cardWidth, modalMaxWidth } = useResponsiveLayout()
+    const playerColWidth = isTablet ? cardWidth(10, 3) : '48.5%'
+
     const [loading, setLoading] = useState(true)
     const [cuadrillas, setCuadrillas] = useState<any[]>([])
     const [selectedSquadId, setSelectedSquadId] = useState<string>('')
     const [membersBySquad, setMembersBySquad] = useState<Record<string, any[]>>({})
     const [benchEmployees, setBenchEmployees] = useState<any[]>([])
+    const [allEmployees, setAllEmployees] = useState<any[]>([])
+    const [sysUsers, setSysUsers] = useState<any[]>([])
+    const [supervisorsMeta, setSupervisorsMeta] = useState<Record<string, SquadSupervisorMeta>>({})
+    const [workerSquadMap, setWorkerSquadMap] = useState<
+        Record<string, { squadId: string; squadName: string; supervisorName: string }>
+    >({})
     const [historyLog, setHistoryLog] = useState<Record<string, any>>({})
 
-    // Modal de Transferencia Táctica
+    // Modal de Transferencia Táctica & Selector de Supervisor Titular
     const [selectedWorker, setSelectedWorker] = useState<any | null>(null)
+    const [supervisorModalOpen, setSupervisorModalOpen] = useState(false)
+    const [savingSupervisor, setSavingSupervisor] = useState(false)
     const [transferAnim] = useState(new Animated.Value(0))
     const [transferringTo, setTransferringTo] = useState<string | null>(null)
 
@@ -93,6 +112,35 @@ export default function MobileSquadsScreen() {
         }
     }
 
+    const getSquadSupervisorInfo = useCallback(
+        (squad: any, metaMap = supervisorsMeta, empList = allEmployees, usersList = sysUsers) => {
+            const meta = metaMap[squad?.id]
+            const supEmp =
+                empList.find((e) => e.id === (squad?.supervisor_id || meta?.supervisor_employee_id)) || null
+            const empName = supEmp ? supEmp.fullName : meta?.supervisor_employee_name || ''
+            const userMatch =
+                usersList.find((u) => u.id === meta?.supervisor_user_id) ||
+                usersList.find(
+                    (u) =>
+                        meta?.supervisor_user_email &&
+                        (u.email || '').toLowerCase() === meta.supervisor_user_email.toLowerCase()
+                ) ||
+                usersList.find((u) => {
+                    const cleanSup = (empName || '').toLowerCase().trim()
+                    const cleanUser = (u.full_name || '').toLowerCase().trim()
+                    return cleanSup && cleanUser && (cleanUser.includes(cleanSup) || cleanSup.includes(cleanUser))
+                }) ||
+                null
+            return {
+                employeeId: supEmp?.id || squad?.supervisor_id || meta?.supervisor_employee_id || null,
+                employeeName: empName || userMatch?.full_name || 'Sin Supervisor Asignado',
+                userId: userMatch?.id || meta?.supervisor_user_id || null,
+                userEmail: userMatch?.email || meta?.supervisor_user_email || null,
+            }
+        },
+        [supervisorsMeta, allEmployees, sysUsers]
+    )
+
     const loadSquadsData = useCallback(async () => {
         setLoading(true)
         try {
@@ -101,10 +149,12 @@ export default function MobileSquadsScreen() {
                 { data: memData },
                 { data: empData },
                 { data: histData },
+                { data: usersData },
+                supMeta,
             ] = await Promise.all([
                 supabase
                     .from('cat_cuadrillas')
-                    .select('id, nombre, codigo, activo, cat_turnos(nombre, codigo), mine_sites(nombre_mina)')
+                    .select('id, nombre, codigo, activo, supervisor_id, cat_turnos(nombre, codigo), mine_sites(nombre_mina)')
                     .eq('activo', true)
                     .order('nombre'),
                 supabase
@@ -119,6 +169,12 @@ export default function MobileSquadsScreen() {
                     .select('value_json')
                     .eq('key_name', SQUAD_HISTORY_KEY)
                     .maybeSingle(),
+                supabase
+                    .from('sys_users')
+                    .select('id, email, full_name, role, active')
+                    .eq('active', true)
+                    .order('full_name'),
+                getSquadSupervisorsMeta(),
             ])
 
             const activeSquads = sqData || []
@@ -132,8 +188,11 @@ export default function MobileSquadsScreen() {
                     ? (histData.value_json as Record<string, any>)
                     : {}
             setHistoryLog(hMap)
+            setSupervisorsMeta(supMeta || {})
+            setSysUsers(usersData || [])
 
             const empMap = new Map<string, any>()
+            const activeEmps: any[] = []
             ;(empData || []).forEach((e: any) => {
                 if (e.status !== 'INACTIVE') {
                     const puesto = Array.isArray(e.cat_puestos)
@@ -142,18 +201,22 @@ export default function MobileSquadsScreen() {
                     const rol = Array.isArray(e.cat_roles_operativos)
                         ? e.cat_roles_operativos[0]?.nombre
                         : e.cat_roles_operativos?.nombre || puesto
-                    empMap.set(e.id, {
+                    const enriched = {
                         ...e,
                         fullName: `${e.first_name || ''} ${e.last_name || ''}`.trim(),
                         puestoNombre: puesto,
                         rolNombre: rol,
                         specialty: classifySpecialty(puesto, rol),
-                    })
+                    }
+                    empMap.set(e.id, enriched)
+                    activeEmps.push(enriched)
                 }
             })
+            setAllEmployees(activeEmps)
 
             const assignedSet = new Set<string>()
             const grouped: Record<string, any[]> = {}
+            const wSquadMap: Record<string, { squadId: string; squadName: string; supervisorName: string }> = {}
             activeSquads.forEach((s: any) => {
                 grouped[s.id] = []
             })
@@ -161,9 +224,16 @@ export default function MobileSquadsScreen() {
             ;(memData || []).forEach((m: any) => {
                 if (m.activo === false) return
                 const emp = empMap.get(m.empleado_id)
-                if (emp && grouped[m.cuadrilla_id] && !assignedSet.has(m.empleado_id)) {
+                const sqObj = activeSquads.find((s: any) => s.id === m.cuadrilla_id)
+                if (emp && sqObj && grouped[m.cuadrilla_id] && !assignedSet.has(m.empleado_id)) {
                     assignedSet.add(m.empleado_id)
                     grouped[m.cuadrilla_id].push(emp)
+                    const supInfo = getSquadSupervisorInfo(sqObj, supMeta || {}, activeEmps, usersData || [])
+                    wSquadMap[emp.id] = {
+                        squadId: sqObj.id,
+                        squadName: sqObj.nombre,
+                        supervisorName: supInfo.employeeName,
+                    }
                 }
             })
 
@@ -176,29 +246,19 @@ export default function MobileSquadsScreen() {
 
             setMembersBySquad(grouped)
             setBenchEmployees(bench)
+            setWorkerSquadMap(wSquadMap)
         } catch (e) {
             console.warn('Error cargando cuadrillas móviles:', e)
         } finally {
             setLoading(false)
         }
-    }, [selectedSquadId])
+    }, [selectedSquadId, getSquadSupervisorInfo])
 
     useEffect(() => {
         loadSquadsData()
     }, [loadSquadsData])
 
-    const handleMoveWorker = async (worker: any, targetSquadId: string | 'BENCH') => {
-        if (!canMoveSquads) {
-            Alert.alert(
-                'Permiso Restringido',
-                'Por regla jerárquica, solo el Superintendente y el Gerente pueden mover personal entre cuadrillas.'
-            )
-            return
-        }
-
-        const currentSquadObj = cuadrillas.find((c) =>
-            (membersBySquad[c.id] || []).some((m) => m.id === worker.id)
-        )
+    const executeMoveWorker = (worker: any, currentSquadObj: any, targetSquadId: string | 'BENCH') => {
         const targetSquadObj =
             targetSquadId === 'BENCH'
                 ? { nombre: 'Banca / Reserva' }
@@ -209,7 +269,7 @@ export default function MobileSquadsScreen() {
 
         Animated.timing(transferAnim, {
             toValue: 1,
-            duration: 650,
+            duration: 550,
             useNativeDriver: true,
         }).start(async () => {
             try {
@@ -236,7 +296,7 @@ export default function MobileSquadsScreen() {
                     [worker.id]: {
                         previousSquad: currentSquadObj?.nombre || 'Reserva',
                         currentSquad: targetSquadObj?.nombre || 'Reserva',
-                        movedBy: user?.nickname || sysRole,
+                        movedBy: user?.full_name || user?.nickname || sysRole,
                         week: 'Semana 38 (21-27 Sep 2026)',
                         updatedAt: new Date().toISOString(),
                     },
@@ -252,6 +312,30 @@ export default function MobileSquadsScreen() {
                     { onConflict: 'key_name' }
                 )
 
+                // 4. Notificar al Supervisor Titular afectado si se retiró personal de su cuadrilla
+                if (currentSquadObj && currentSquadObj.id !== targetSquadId) {
+                    const prevSup = getSquadSupervisorInfo(currentSquadObj)
+                    const actorLabel = user?.full_name || user?.nickname || sysRole
+                    await pushNotification({
+                        type: 'CREW_REMOVED',
+                        title: `👷 Cambio en ${currentSquadObj.nombre}`,
+                        message: `${actorLabel} reubicó a ${worker.fullName} de ${currentSquadObj.nombre} → ${targetSquadObj?.nombre || 'Reserva'}.`,
+                        details: [
+                            `Trabajador: ${worker.fullName} (${worker.puestoNombre})`,
+                            `Origen: ${currentSquadObj.nombre} (Sup: ${prevSup.employeeName})`,
+                            `Destino: ${targetSquadObj?.nombre || 'Reserva'}`,
+                        ],
+                        target_employee_id: prevSup.employeeId,
+                        target_employee_name: prevSup.employeeName,
+                        target_user_ids: prevSup.userId ? [prevSup.userId] : [],
+                        target_user_emails: prevSup.userEmail ? [prevSup.userEmail] : [],
+                        target_roles: ['JEFE_MINA', 'SUPER_ADMIN'],
+                        created_by_name: actorLabel,
+                        created_by_email: user?.email || null,
+                        link: '/dashboard/catalogos/cuadrillas',
+                    })
+                }
+
                 setSelectedWorker(null)
                 setTransferringTo(null)
                 await loadSquadsData()
@@ -262,8 +346,81 @@ export default function MobileSquadsScreen() {
         })
     }
 
+    const handleMoveWorker = (worker: any, targetSquadId: string | 'BENCH') => {
+        if (!canMoveSquads) {
+            Alert.alert(
+                'Permiso Restringido',
+                'Por regla jerárquica, solo Superintendente, Gerente, Jefe de Mina o Dirección Operativa pueden mover personal entre cuadrillas.'
+            )
+            return
+        }
+
+        const currentSquadObj = cuadrillas.find((c) =>
+            (membersBySquad[c.id] || []).some((m) => m.id === worker.id)
+        )
+        if (currentSquadObj && currentSquadObj.id === targetSquadId) {
+            Alert.alert('Sin Cambios', `${worker.fullName} ya pertenece a ${currentSquadObj.nombre}.`)
+            return
+        }
+
+        if (currentSquadObj) {
+            const supInfo = getSquadSupervisorInfo(currentSquadObj)
+            const targetLabel =
+                targetSquadId === 'BENCH'
+                    ? 'Banca / Reserva'
+                    : cuadrillas.find((c) => c.id === targetSquadId)?.nombre || 'Destino'
+            Alert.alert(
+                'Confirmar Reubicación de Personal',
+                `${worker.fullName} actualmente está en ${currentSquadObj.nombre} (Supervisor: ${supInfo.employeeName}).\n\n¿Mover a "${targetLabel}"? Se notificará automáticamente al supervisor titular.`,
+                [
+                    { text: 'Cancelar', style: 'cancel' },
+                    {
+                        text: 'Confirmar y Notificar',
+                        onPress: () => executeMoveWorker(worker, currentSquadObj, targetSquadId),
+                    },
+                ]
+            )
+            return
+        }
+
+        executeMoveWorker(worker, null, targetSquadId)
+    }
+
+    const handleAssignSquadSupervisor = async (squad: any, supEmp: any | null, supUser: any | null) => {
+        if (!squad) return
+        setSavingSupervisor(true)
+        try {
+            if (supEmp?.id) {
+                await supabase
+                    .from('cat_cuadrillas')
+                    .update({ supervisor_id: supEmp.id })
+                    .eq('id', squad.id)
+            }
+            await saveSquadSupervisorMeta(squad.id, {
+                supervisor_employee_id: supEmp?.id || null,
+                supervisor_employee_name: supEmp?.fullName || supUser?.full_name || null,
+                supervisor_user_id: supUser?.id || null,
+                supervisor_user_email: supUser?.email || null,
+                supervisor_user_name: supUser?.full_name || null,
+            })
+            setSupervisorModalOpen(false)
+            await loadSquadsData()
+        } catch (err: any) {
+            Alert.alert('Error', err?.message || 'No se pudo asignar el supervisor titular.')
+        } finally {
+            setSavingSupervisor(false)
+        }
+    }
+
     const activeSquad = cuadrillas.find((c) => c.id === selectedSquadId) || cuadrillas[0]
     const currentMembers = activeSquad ? membersBySquad[activeSquad.id] || [] : []
+    const activeSupervisor = activeSquad ? getSquadSupervisorInfo(activeSquad) : null
+    const selectedWorkerCurrent = selectedWorker ? workerSquadMap[selectedWorker.id] : null
+
+    const supervisorCandidatesEmp = allEmployees.filter((e) => {
+        const txt = `${e.puestoNombre} ${e.rolNombre}`.toUpperCase()
+        return txt.includes('SUPERV') || txt.includes('JEFE') || txt.includes('CAPIT') || txt.includes('SUPERINT')
+    })
 
     return (
         <MobileShell
@@ -369,7 +526,7 @@ export default function MobileSquadsScreen() {
                         <View style={[styles.pitchContainer, { backgroundColor: bgPitch }]}>
                             {/* Líneas de Cancha */}
                             <View style={styles.pitchHeader}>
-                                <View>
+                                <View style={{ flex: 1, marginRight: 8 }}>
                                     <Text style={styles.pitchTitle}>
                                         ⚽ CANCHA TÁCTICA: {activeSquad?.nombre || 'CUADRILLA'}
                                     </Text>
@@ -382,6 +539,27 @@ export default function MobileSquadsScreen() {
                                 </View>
                             </View>
 
+                            {/* Supervisor Titular de esta Cuadrilla */}
+                            <View style={styles.supBannerRow}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 6 }}>
+                                    <UserCheck size={15} color="#34D399" />
+                                    <Text style={styles.supBannerText} numberOfLines={2}>
+                                        Supervisor Titular:{' '}
+                                        <Text style={{ fontWeight: '900', color: '#FFFFFF' }}>
+                                            {activeSupervisor?.employeeName || 'Sin Supervisor Asignado'}
+                                        </Text>
+                                    </Text>
+                                </View>
+                                {canMoveSquads && activeSquad && (
+                                    <TouchableOpacity
+                                        onPress={() => setSupervisorModalOpen(true)}
+                                        style={styles.supChangeBtn}
+                                    >
+                                        <Text style={styles.supChangeBtnText}>Cambiar</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+
                             {currentMembers.length === 0 ? (
                                 <View style={styles.emptyPitch}>
                                     <Text style={styles.emptyPitchText}>
@@ -392,12 +570,16 @@ export default function MobileSquadsScreen() {
                                 <View style={styles.playersGrid}>
                                     {currentMembers.map((emp: any) => {
                                         const hist = historyLog[emp.id]
+                                        const curSq = workerSquadMap[emp.id]
                                         return (
                                             <TouchableOpacity
                                                 key={emp.id}
                                                 onPress={() => setSelectedWorker(emp)}
                                                 activeOpacity={0.85}
-                                                style={styles.playerCard}
+                                                style={[
+                                                    styles.playerCard,
+                                                    { width: playerColWidth as any },
+                                                ]}
                                             >
                                                 {/* Etiqueta de Especialidad Animada (Perforista / Ayudante / Scoop) */}
                                                 <View
@@ -516,11 +698,19 @@ export default function MobileSquadsScreen() {
                     <View
                         style={[
                             styles.modalCard,
-                            { backgroundColor: bgCard, borderColor: borderCol },
+                            {
+                                backgroundColor: bgCard,
+                                borderColor: borderCol,
+                                maxHeight: screenHeight * 0.86,
+                                maxWidth: isTablet ? modalMaxWidth : '100%',
+                                width: '100%',
+                                alignSelf: 'center',
+                                paddingBottom: Math.max(insets.bottom + 14, 24),
+                            },
                         ]}
                     >
                         {selectedWorker && (
-                            <>
+                            <ScrollView showsVerticalScrollIndicator={false}>
                                 <View style={styles.modalHeader}>
                                     <View style={{ flex: 1 }}>
                                         <View
@@ -549,6 +739,11 @@ export default function MobileSquadsScreen() {
                                             Puesto Oficial: {selectedWorker.puestoNombre} • Código:{' '}
                                             {selectedWorker.employee_code}
                                         </Text>
+                                        {selectedWorkerCurrent && (
+                                            <Text style={[styles.modalSub, { color: '#059669', fontWeight: '800', marginTop: 4 }]}>
+                                                Asignación Actual: {selectedWorkerCurrent.squadName} • Sup: {selectedWorkerCurrent.supervisorName}
+                                            </Text>
+                                        )}
                                     </View>
                                     <TouchableOpacity
                                         onPress={() => setSelectedWorker(null)}
@@ -607,20 +802,33 @@ export default function MobileSquadsScreen() {
                                             Selecciona Cuadrilla Destino (Traspaso Directo):
                                         </Text>
                                         <View style={styles.targetGrid}>
-                                            {cuadrillas.map((sq) => (
-                                                <TouchableOpacity
-                                                    key={sq.id}
-                                                    onPress={() =>
-                                                        handleMoveWorker(selectedWorker, sq.id)
-                                                    }
-                                                    style={styles.targetSquadBtn}
-                                                >
-                                                    <UserPlus size={16} color="#10B981" />
-                                                    <Text style={styles.targetSquadText}>
-                                                        {sq.nombre}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            ))}
+                                            {cuadrillas.map((sq) => {
+                                                const sqSup = getSquadSupervisorInfo(sq)
+                                                const isHere = selectedWorkerCurrent?.squadId === sq.id
+                                                return (
+                                                    <TouchableOpacity
+                                                        key={sq.id}
+                                                        disabled={isHere}
+                                                        onPress={() =>
+                                                            handleMoveWorker(selectedWorker, sq.id)
+                                                        }
+                                                        style={[
+                                                            styles.targetSquadBtn,
+                                                            isHere && { opacity: 0.45, borderColor: '#64748B' },
+                                                        ]}
+                                                    >
+                                                        <UserPlus size={15} color="#10B981" />
+                                                        <View style={{ flex: 1 }}>
+                                                            <Text style={styles.targetSquadText} numberOfLines={1}>
+                                                                {sq.nombre}
+                                                            </Text>
+                                                            <Text style={{ color: '#A7F3D0', fontSize: 9, fontWeight: '700' }} numberOfLines={1}>
+                                                                Sup: {sqSup.employeeName}
+                                                            </Text>
+                                                        </View>
+                                                    </TouchableOpacity>
+                                                )
+                                            })}
 
                                             <TouchableOpacity
                                                 onPress={() =>
@@ -639,11 +847,120 @@ export default function MobileSquadsScreen() {
                                     <View style={styles.restrictedNotice}>
                                         <Lock size={18} color="#E11D48" />
                                         <Text style={styles.restrictedNoticeText}>
-                                            Tu perfil ({sysRole}) es de consulta en cuadrillas. Solo el Superintendente y el Gerente pueden mover trabajadores.
+                                            Tu perfil ({sysRole}) es de consulta en cuadrillas. Solo Superintendente, Gerente, Jefe de Mina o Dirección Operativa pueden mover trabajadores.
                                         </Text>
                                     </View>
                                 )}
-                            </>
+                            </ScrollView>
+                        )}
+                    </View>
+                </View>
+            </Modal>
+
+            {/* MODAL PARA ASIGNAR SUPERVISOR TITULAR DE LA CUADRILLA */}
+            <Modal visible={supervisorModalOpen} animationType="slide" transparent>
+                <View style={styles.modalOverlay}>
+                    <View
+                        style={[
+                            styles.modalCard,
+                            {
+                                backgroundColor: bgCard,
+                                borderColor: '#10B981',
+                                maxHeight: screenHeight * 0.8,
+                                maxWidth: isTablet ? modalMaxWidth : '100%',
+                                width: '100%',
+                                alignSelf: 'center',
+                                paddingBottom: Math.max(insets.bottom + 14, 24),
+                            },
+                        ]}
+                    >
+                        <View style={styles.modalHeader}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={[styles.modalTitle, { color: textPrimary }]}>
+                                    Supervisor Titular ({activeSquad?.nombre})
+                                </Text>
+                                <Text style={[styles.modalSub, { color: textSecondary }]}>
+                                    Selecciona al supervisor de campo y/o usuario web encargado de esta cuadrilla:
+                                </Text>
+                            </View>
+                            <TouchableOpacity
+                                onPress={() => setSupervisorModalOpen(false)}
+                                style={styles.closeModalBtn}
+                            >
+                                <X size={18} color={textPrimary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        {savingSupervisor ? (
+                            <ActivityIndicator size="large" color="#10B981" style={{ marginVertical: 20 }} />
+                        ) : (
+                            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: screenHeight * 0.52 }}>
+                                {(supervisorCandidatesEmp.length > 0 ? supervisorCandidatesEmp : allEmployees.slice(0, 20)).map(
+                                    (emp) => {
+                                        const matchedUser = sysUsers.find((u) => {
+                                            const a = (emp.fullName || '').toLowerCase()
+                                            const b = (u.full_name || '').toLowerCase()
+                                            return a && b && (b.includes(a) || a.includes(b))
+                                        })
+                                        return (
+                                            <TouchableOpacity
+                                                key={emp.id}
+                                                onPress={() =>
+                                                    handleAssignSquadSupervisor(activeSquad, emp, matchedUser || null)
+                                                }
+                                                style={{
+                                                    padding: 12,
+                                                    borderRadius: 12,
+                                                    borderWidth: 1,
+                                                    borderColor: borderCol,
+                                                    marginBottom: 8,
+                                                    flexDirection: 'row',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'space-between',
+                                                }}
+                                            >
+                                                <View style={{ flex: 1, marginRight: 8 }}>
+                                                    <Text style={{ color: textPrimary, fontWeight: '900', fontSize: 13 }}>
+                                                        {emp.fullName}
+                                                    </Text>
+                                                    <Text style={{ color: textSecondary, fontSize: 10 }}>
+                                                        {emp.puestoNombre} {matchedUser ? `• ${matchedUser.email}` : ''}
+                                                    </Text>
+                                                </View>
+                                                <UserCheck size={16} color="#10B981" />
+                                            </TouchableOpacity>
+                                        )
+                                    }
+                                )}
+                                {sysUsers
+                                    .filter((u) => (u.role || '').toUpperCase().includes('SUPERV') || (u.role || '').toUpperCase().includes('JEFE'))
+                                    .map((u) => (
+                                        <TouchableOpacity
+                                            key={u.id}
+                                            onPress={() => handleAssignSquadSupervisor(activeSquad, null, u)}
+                                            style={{
+                                                padding: 12,
+                                                borderRadius: 12,
+                                                borderWidth: 1,
+                                                borderColor: '#3B82F680',
+                                                marginBottom: 8,
+                                                flexDirection: 'row',
+                                                alignItems: 'center',
+                                                justifyContent: 'space-between',
+                                            }}
+                                        >
+                                            <View style={{ flex: 1, marginRight: 8 }}>
+                                                <Text style={{ color: textPrimary, fontWeight: '900', fontSize: 13 }}>
+                                                    {u.full_name} ({u.role})
+                                                </Text>
+                                                <Text style={{ color: textSecondary, fontSize: 10 }}>
+                                                    Usuario Web/APK: {u.email}
+                                                </Text>
+                                            </View>
+                                            <Shield size={16} color="#3B82F6" />
+                                        </TouchableOpacity>
+                                    ))}
+                            </ScrollView>
                         )}
                     </View>
                 </View>
@@ -912,6 +1229,36 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: 8,
+    },
+    supBannerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: 'rgba(6, 78, 59, 0.72)',
+        borderRadius: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(52, 211, 153, 0.35)',
+        gap: 8,
+    },
+    supBannerText: {
+        color: '#D1FAE5',
+        fontSize: 11,
+        fontWeight: '700',
+        flex: 1,
+    },
+    supChangeBtn: {
+        backgroundColor: '#10B981',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 8,
+    },
+    supChangeBtnText: {
+        color: '#022C22',
+        fontSize: 10,
+        fontWeight: '900',
     },
     targetSquadBtn: {
         width: '48%',

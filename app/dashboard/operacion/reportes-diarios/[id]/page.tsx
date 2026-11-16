@@ -221,7 +221,7 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
     }
 
     return (
-        <div id="report-content" className="p-6 max-w-5xl mx-auto space-y-8 bg-slate-950">
+        <div id="report-content" className="p-2 sm:p-4 md:p-6 max-w-6xl w-full min-w-0 mx-auto space-y-8 bg-slate-950">
             {/* BACK BUTTON & HEADER */}
             <div className="flex flex-col gap-4">
                 <Link

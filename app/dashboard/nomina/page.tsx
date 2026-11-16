@@ -619,7 +619,7 @@ export default function PreNominaPage() {
     }
 
     return (
-        <div className="p-6 max-w-7xl mx-auto">
+        <div className="p-2 sm:p-4 max-w-full w-full min-w-0 mx-auto">
             {/* HERDER & ACTIONS */}
             <div className="mb-8 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
                 <div>

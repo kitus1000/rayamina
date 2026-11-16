@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
     View,
     Text,
@@ -7,38 +7,56 @@ import {
     TextInput,
     ActivityIndicator,
     Alert,
+    KeyboardAvoidingView,
+    Platform,
     StyleSheet,
 } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
     MessageSquare,
     ShieldAlert,
     Send,
     CheckCircle2,
     XCircle,
-    AlertTriangle,
     Plus,
+    Lock,
+    Globe,
 } from 'lucide-react-native'
 import { supabase } from '../../lib/supabase'
 import { useMobileAuth } from '../../lib/auth-context'
+import { useResponsiveLayout } from '../../lib/responsive'
+import { pushNotification } from '../../lib/notifications-service'
 import MobileShell from '../../components/MobileShell'
 
 const BLOG_STORE_KEY = 'ops_blog_tareas_store'
+const PRIVATE_STORE_KEY = 'ops_blog_private_store'
 const SEC_STORE_KEY = 'ops_security_incidents_store'
+
+type MsgFilter = 'ALL' | 'PUBLIC' | 'PRIVATE' | 'TASKS' | 'PENDING'
 
 export default function MobileTasksAndSecurityScreen() {
     const { user, sysRole, theme, isJefaturaOrAbove } = useMobileAuth()
+    const insets = useSafeAreaInsets()
+    const { isCompact, horizontalPadding } = useResponsiveLayout()
+
     const [activeTab, setActiveTab] = useState<'BITACORA' | 'SEGURIDAD'>('BITACORA')
     const [loading, setLoading] = useState(true)
 
-    // Estado de Bitácora / Tareas
-    const [messages, setMessages] = useState<any[]>([])
+    // Estado de Bitácora / Tareas (Pública + Privada)
+    const [publicMessages, setPublicMessages] = useState<any[]>([])
+    const [privateMessages, setPrivateMessages] = useState<any[]>([])
+    const [usersList, setUsersList] = useState<any[]>([])
+    const [filter, setFilter] = useState<MsgFilter>('ALL')
+
     const [newMsgText, setNewMsgText] = useState('')
     const [isTaskFlag, setIsTaskFlag] = useState(false)
+    const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>('PUBLIC')
+    const [recipientId, setRecipientId] = useState<string>('')
 
     // Estado de Reportes de Seguridad / Personal Problemático
     const [incidents, setIncidents] = useState<any[]>([])
     const [incTipo, setIncTipo] = useState<'ACCIDENTE' | 'CONDICION_INSEGURA' | 'PERSONAL_PROBLEMATICO'>('CONDICION_INSEGURA')
-    const [incSeveridad, setIncSeveridad] = useState<'ALTA' | 'MEDIA' | 'BAJA'>('MEDIA')
+    const [incSeveridad] = useState<'ALTA' | 'MEDIA' | 'BAJA'>('MEDIA')
     const [incInvolucrado, setIncInvolucrado] = useState('')
     const [incDesc, setIncDesc] = useState('')
 
@@ -52,29 +70,131 @@ export default function MobileTasksAndSecurityScreen() {
     const loadAll = useCallback(async () => {
         setLoading(true)
         try {
-            const [{ data: blogStore }, { data: secStore }] = await Promise.all([
-                supabase.from('sys_config').select('value_json').eq('key_name', BLOG_STORE_KEY).maybeSingle(),
-                supabase.from('sys_config').select('value_json').eq('key_name', SEC_STORE_KEY).maybeSingle(),
-            ])
+            const [{ data: blogStore }, { data: privStore }, { data: secStore }, { data: usersData }] =
+                await Promise.all([
+                    supabase.from('sys_config').select('value_json').eq('key_name', BLOG_STORE_KEY).maybeSingle(),
+                    supabase.from('sys_config').select('value_json').eq('key_name', PRIVATE_STORE_KEY).maybeSingle(),
+                    supabase.from('sys_config').select('value_json').eq('key_name', SEC_STORE_KEY).maybeSingle(),
+                    supabase
+                        .from('sys_users')
+                        .select('id, email, full_name, role, active')
+                        .eq('active', true)
+                        .order('full_name'),
+                ])
 
             const blogList = Array.isArray(blogStore?.value_json) ? blogStore.value_json : []
-            setMessages(blogList)
+            setPublicMessages(blogList.map((m: any) => ({ ...m, visibility: m.visibility || 'PUBLIC' })))
+
+            const privList = Array.isArray(privStore?.value_json) ? privStore.value_json : []
+            setPrivateMessages(privList.map((m: any) => ({ ...m, visibility: 'PRIVATE' })))
 
             const secList = Array.isArray(secStore?.value_json) ? secStore.value_json : []
             setIncidents(secList)
+
+            const activeUsers = (usersData || []).filter((u: any) => u.id !== user?.id)
+            setUsersList(activeUsers)
+            if (activeUsers.length > 0 && !recipientId) {
+                setRecipientId(activeUsers[0].id)
+            }
         } catch (err) {
             console.warn('Error cargando bitácora y seguridad:', err)
         } finally {
             setLoading(false)
         }
-    }, [])
+    }, [user?.id, recipientId])
 
     useEffect(() => {
         loadAll()
     }, [loadAll])
 
+    const visibleMessages = useMemo(() => {
+        const myEmail = (user?.email || '').toLowerCase().trim()
+        const myId = (user?.id || '').trim()
+
+        const visiblePrivate = privateMessages.filter((m) => {
+            if (m.is_deleted) return false
+            const isAuthor =
+                (myId && m.author_id === myId) ||
+                (myEmail && (m.author_email || m.author?.email || '').toLowerCase().trim() === myEmail)
+            const isRecipient =
+                (myId && m.recipient_id === myId) ||
+                (myEmail && (m.recipient_email || '').toLowerCase().trim() === myEmail)
+            return isAuthor || isRecipient
+        })
+
+        const combined = [
+            ...publicMessages.filter((m) => !m.is_deleted),
+            ...visiblePrivate,
+        ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+
+        return combined.filter((m) => {
+            if (filter === 'PUBLIC') return m.visibility !== 'PRIVATE'
+            if (filter === 'PRIVATE') return m.visibility === 'PRIVATE'
+            if (filter === 'TASKS') return Boolean(m.is_task)
+            if (filter === 'PENDING') return Boolean(m.is_task) && m.task_status === 'PENDING'
+            return true
+        })
+    }, [publicMessages, privateMessages, filter, user?.email, user?.id])
+
     const handleSendMessage = async () => {
         if (!newMsgText.trim()) return
+
+        if (visibility === 'PRIVATE') {
+            const target = usersList.find((u) => u.id === recipientId)
+            if (!target) {
+                Alert.alert('Destinatario requerido', 'Selecciona un usuario destinatario para el mensaje privado.')
+                return
+            }
+
+            const actorName = user?.full_name || user?.nickname || sysRole
+            const newPrivObj = {
+                id: 'priv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+                author_id: user?.id || 'mob-user',
+                body: newMsgText.trim(),
+                is_task: isTaskFlag,
+                task_status: isTaskFlag ? 'PENDING' : null,
+                created_at: new Date().toISOString(),
+                visibility: 'PRIVATE',
+                recipient_id: target.id,
+                recipient_name: target.full_name || target.email,
+                recipient_email: target.email,
+                recipient_role: target.role,
+                author_email: user?.email || null,
+                author_name: actorName,
+                author: {
+                    nickname: `${actorName} (${sysRole})`,
+                    avatar_url: '',
+                    email: user?.email || 'operaciones@rayamina.com',
+                },
+            }
+
+            const updatedPriv = [...privateMessages, newPrivObj]
+            setPrivateMessages(updatedPriv)
+            setNewMsgText('')
+            setIsTaskFlag(false)
+
+            await supabase.from('sys_config').upsert(
+                {
+                    key_name: PRIVATE_STORE_KEY,
+                    value_json: updatedPriv,
+                    description: 'Mensajes y tareas privadas de bitácora por usuario destinatario',
+                },
+                { onConflict: 'key_name' }
+            )
+
+            await pushNotification({
+                type: 'PRIVATE_TASK',
+                title: isTaskFlag ? '🔒 Nueva Tarea Privada Asignada' : '🔒 Nuevo Mensaje Privado',
+                message: `${actorName} te envió ${isTaskFlag ? 'una tarea privada' : 'un mensaje privado'}: "${newPrivObj.body.slice(0, 90)}"`,
+                target_user_ids: [target.id],
+                target_user_emails: target.email ? [target.email] : [],
+                created_by_name: actorName,
+                created_by_email: user?.email || null,
+                link: '/dashboard/blog-tareas',
+            })
+            return
+        }
+
         const msgObj = {
             id: 'mob-msg-' + Date.now(),
             author_id: user?.id || 'mob-user',
@@ -82,15 +202,18 @@ export default function MobileTasksAndSecurityScreen() {
             is_task: isTaskFlag,
             task_status: isTaskFlag ? 'PENDING' : null,
             created_at: new Date().toISOString(),
+            visibility: 'PUBLIC',
+            author_email: user?.email || null,
+            author_name: user?.full_name || user?.nickname || sysRole,
             author: {
-                nickname: `${user?.nickname || 'Mando'} (${sysRole})`,
+                nickname: `${user?.full_name || user?.nickname || 'Mando'} (${sysRole})`,
                 avatar_url: '',
                 email: user?.email || 'operaciones@rayamina.com',
             },
         }
 
-        const updated = [...messages, msgObj]
-        setMessages(updated)
+        const updated = [...publicMessages, msgObj]
+        setPublicMessages(updated)
         setNewMsgText('')
         setIsTaskFlag(false)
 
@@ -104,18 +227,37 @@ export default function MobileTasksAndSecurityScreen() {
         )
     }
 
-    const handleResolveTask = async (msgId: string, status: 'COMPLETED' | 'REJECTED') => {
-        const updated = messages.map((m) =>
-            m.id === msgId
+    const handleResolveTask = async (msg: any, status: 'COMPLETED' | 'REJECTED') => {
+        const resolver = user?.full_name || user?.nickname || sysRole
+        if (msg.visibility === 'PRIVATE' || String(msg.id).startsWith('priv-')) {
+            const updatedPriv = privateMessages.map((m) =>
+                m.id === msg.id
+                    ? { ...m, task_status: status, resolved_by: resolver, resolved_at: new Date().toISOString() }
+                    : m
+            )
+            setPrivateMessages(updatedPriv)
+            await supabase.from('sys_config').upsert(
+                {
+                    key_name: PRIVATE_STORE_KEY,
+                    value_json: updatedPriv,
+                    description: 'Mensajes y tareas privadas de bitácora por usuario destinatario',
+                },
+                { onConflict: 'key_name' }
+            )
+            return
+        }
+
+        const updated = publicMessages.map((m) =>
+            m.id === msg.id
                 ? {
                       ...m,
                       task_status: status,
-                      resolved_by: user?.nickname || sysRole,
+                      resolved_by: resolver,
                       resolved_at: new Date().toISOString(),
                   }
                 : m
         )
-        setMessages(updated)
+        setPublicMessages(updated)
         await supabase.from('sys_config').upsert(
             {
                 key_name: BLOG_STORE_KEY,
@@ -142,7 +284,7 @@ export default function MobileTasksAndSecurityScreen() {
             severidad: incSeveridad,
             involucrado: incInvolucrado.trim() || 'General / Frente',
             descripcion: incDesc.trim(),
-            autor: `${user?.nickname || 'Supervisor'} (${sysRole})`,
+            autor: `${user?.full_name || user?.nickname || 'Supervisor'} (${sysRole})`,
             created_at: new Date().toISOString(),
         }
 
@@ -169,7 +311,7 @@ export default function MobileTasksAndSecurityScreen() {
             pillar="4. Reportes y Seguridad"
             pillarHex="#F43F5E"
         >
-            {/* PESTAÑAS SUPERIORES: BITÁCORA VS SEGURIDAD / PERSONAL PROBLEMÁTICO */}
+            {/* PESTAÑAS SUPERIORES */}
             <View style={[styles.tabRow, { backgroundColor: bgCard, borderBottomColor: borderCol }]}>
                 <TouchableOpacity
                     onPress={() => setActiveTab('BITACORA')}
@@ -179,7 +321,7 @@ export default function MobileTasksAndSecurityScreen() {
                     ]}
                 >
                     <MessageSquare
-                        size={16}
+                        size={15}
                         color={activeTab === 'BITACORA' ? '#0F172A' : textSecondary}
                     />
                     <Text
@@ -187,10 +329,12 @@ export default function MobileTasksAndSecurityScreen() {
                             styles.tabBtnText,
                             {
                                 color: activeTab === 'BITACORA' ? '#0F172A' : textSecondary,
+                                fontSize: isCompact ? 11 : 12,
                             },
                         ]}
+                        numberOfLines={1}
                     >
-                        Bitácora y Tareas ({messages.length})
+                        Bitácora ({visibleMessages.length})
                     </Text>
                 </TouchableOpacity>
 
@@ -202,7 +346,7 @@ export default function MobileTasksAndSecurityScreen() {
                     ]}
                 >
                     <ShieldAlert
-                        size={16}
+                        size={15}
                         color={activeTab === 'SEGURIDAD' ? '#FFFFFF' : textSecondary}
                     />
                     <Text
@@ -210,10 +354,12 @@ export default function MobileTasksAndSecurityScreen() {
                             styles.tabBtnText,
                             {
                                 color: activeTab === 'SEGURIDAD' ? '#FFFFFF' : textSecondary,
+                                fontSize: isCompact ? 11 : 12,
                             },
                         ]}
+                        numberOfLines={1}
                     >
-                        Accidentes y Disciplina ({incidents.length})
+                        Seguridad ({incidents.length})
                     </Text>
                 </TouchableOpacity>
             </View>
@@ -223,147 +369,301 @@ export default function MobileTasksAndSecurityScreen() {
                     <ActivityIndicator size="large" color="#F43F5E" />
                 </View>
             ) : activeTab === 'BITACORA' ? (
-                <View style={{ flex: 1 }}>
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    style={{ flex: 1 }}
+                >
+                    {/* FILTROS RÁPIDOS DE PRIVACIDAD Y TAREAS */}
+                    <View style={{ borderBottomWidth: 1, borderBottomColor: borderCol, paddingVertical: 8, paddingHorizontal: horizontalPadding }}>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                            {(
+                                [
+                                    { id: 'ALL', label: 'Todos' },
+                                    { id: 'PUBLIC', label: '🌐 Públicos' },
+                                    { id: 'PRIVATE', label: '🔒 Privados' },
+                                    { id: 'TASKS', label: '📌 Tareas' },
+                                    { id: 'PENDING', label: '⏳ Pendientes' },
+                                ] as Array<{ id: MsgFilter; label: string }>
+                            ).map((f) => {
+                                const active = filter === f.id
+                                return (
+                                    <TouchableOpacity
+                                        key={f.id}
+                                        onPress={() => setFilter(f.id)}
+                                        style={[
+                                            styles.filterChip,
+                                            {
+                                                backgroundColor: active ? '#F59E0B' : bgCard,
+                                                borderColor: active ? '#D97706' : borderCol,
+                                            },
+                                        ]}
+                                    >
+                                        <Text
+                                            style={{
+                                                fontSize: 10.5,
+                                                fontWeight: '900',
+                                                color: active ? '#0F172A' : textSecondary,
+                                            }}
+                                        >
+                                            {f.label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                )
+                            })}
+                        </ScrollView>
+                    </View>
+
                     <ScrollView
-                        style={styles.scroll}
-                        contentContainerStyle={{ paddingBottom: 24 }}
+                        style={[styles.scroll, { paddingHorizontal: horizontalPadding }]}
+                        contentContainerStyle={{ paddingBottom: 20 }}
                         showsVerticalScrollIndicator={false}
                     >
-                        {messages.map((msg) => (
-                            <View
-                                key={msg.id}
-                                style={[
-                                    styles.msgCard,
-                                    {
-                                        backgroundColor: msg.is_task
-                                            ? isLight
-                                                ? '#FFFBEB'
-                                                : '#1E293B'
-                                            : bgCard,
-                                        borderColor: msg.is_task ? '#F59E0B' : borderCol,
-                                    },
-                                ]}
-                            >
-                                <View style={styles.msgHeader}>
-                                    <Text style={[styles.msgAuthor, { color: '#D97706' }]}>
-                                        {msg.author?.nickname || 'Operaciones'}
+                        {visibleMessages.map((msg) => {
+                            const isPriv = msg.visibility === 'PRIVATE'
+                            return (
+                                <View
+                                    key={msg.id}
+                                    style={[
+                                        styles.msgCard,
+                                        {
+                                            backgroundColor: isPriv
+                                                ? isLight
+                                                    ? '#EEF2FF'
+                                                    : '#1E1B4B'
+                                                : msg.is_task
+                                                ? isLight
+                                                    ? '#FFFBEB'
+                                                    : '#1E293B'
+                                                : bgCard,
+                                            borderColor: isPriv ? '#6366F1' : msg.is_task ? '#F59E0B' : borderCol,
+                                        },
+                                    ]}
+                                >
+                                    <View style={styles.msgHeader}>
+                                        <Text style={[styles.msgAuthor, { color: isPriv ? '#818CF8' : '#D97706', flex: 1 }]}>
+                                            {msg.author?.nickname || msg.author_name || 'Operaciones'}
+                                        </Text>
+                                        <View style={{ flexDirection: 'row', gap: 4 }}>
+                                            {isPriv ? (
+                                                <View style={[styles.taskBadge, { backgroundColor: '#6366F1' }]}>
+                                                    <Text style={[styles.taskBadgeText, { color: '#FFF' }]}>
+                                                        🔒 PRIVADO → {msg.recipient_name || 'Directo'}
+                                                    </Text>
+                                                </View>
+                                            ) : (
+                                                <View style={[styles.taskBadge, { backgroundColor: '#10B98125' }]}>
+                                                    <Text style={[styles.taskBadgeText, { color: '#10B981' }]}>
+                                                        🌐 PÚBLICO
+                                                    </Text>
+                                                </View>
+                                            )}
+                                            {msg.is_task && (
+                                                <View style={styles.taskBadge}>
+                                                    <Text style={styles.taskBadgeText}>📌 TAREA</Text>
+                                                </View>
+                                            )}
+                                        </View>
+                                    </View>
+
+                                    <Text style={[styles.msgBody, { color: textPrimary }]}>
+                                        {msg.body}
                                     </Text>
+
                                     {msg.is_task && (
-                                        <View style={styles.taskBadge}>
-                                            <Text style={styles.taskBadgeText}>📌 CONSIGNA / TAREA</Text>
+                                        <View style={styles.taskActionsRow}>
+                                            {msg.task_status === 'PENDING' ? (
+                                                <>
+                                                    <TouchableOpacity
+                                                        onPress={() => handleResolveTask(msg, 'COMPLETED')}
+                                                        style={styles.completeTaskBtn}
+                                                    >
+                                                        <CheckCircle2 size={14} color="#FFF" />
+                                                        <Text style={styles.completeTaskText}>
+                                                            Cumplida
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity
+                                                        onPress={() => handleResolveTask(msg, 'REJECTED')}
+                                                        style={styles.rejectTaskBtn}
+                                                    >
+                                                        <XCircle size={14} color="#FFF" />
+                                                        <Text style={styles.completeTaskText}>
+                                                            Impedimento
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                </>
+                                            ) : (
+                                                <Text
+                                                    style={{
+                                                        fontSize: 11,
+                                                        fontWeight: '900',
+                                                        color:
+                                                            msg.task_status === 'COMPLETED'
+                                                                ? '#10B981'
+                                                                : '#F43F5E',
+                                                    }}
+                                                >
+                                                    {msg.task_status === 'COMPLETED'
+                                                        ? '✔ Tarea Cumplida en Turno'
+                                                        : '✖ Impedimento Reportado'}
+                                                </Text>
+                                            )}
                                         </View>
                                     )}
                                 </View>
-
-                                <Text style={[styles.msgBody, { color: textPrimary }]}>
-                                    {msg.body}
-                                </Text>
-
-                                {msg.is_task && (
-                                    <View style={styles.taskActionsRow}>
-                                        {msg.task_status === 'PENDING' ? (
-                                            <>
-                                                <TouchableOpacity
-                                                    onPress={() =>
-                                                        handleResolveTask(msg.id, 'COMPLETED')
-                                                    }
-                                                    style={styles.completeTaskBtn}
-                                                >
-                                                    <CheckCircle2 size={14} color="#FFF" />
-                                                    <Text style={styles.completeTaskText}>
-                                                        Marcar Cumplida
-                                                    </Text>
-                                                </TouchableOpacity>
-                                                <TouchableOpacity
-                                                    onPress={() =>
-                                                        handleResolveTask(msg.id, 'REJECTED')
-                                                    }
-                                                    style={styles.rejectTaskBtn}
-                                                >
-                                                    <XCircle size={14} color="#FFF" />
-                                                    <Text style={styles.completeTaskText}>
-                                                        Impedimento
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            </>
-                                        ) : (
-                                            <Text
-                                                style={{
-                                                    fontSize: 11,
-                                                    fontWeight: '900',
-                                                    color:
-                                                        msg.task_status === 'COMPLETED'
-                                                            ? '#10B981'
-                                                            : '#F43F5E',
-                                                }}
-                                            >
-                                                {msg.task_status === 'COMPLETED'
-                                                    ? '✔ Tarea Cumplida en Turno'
-                                                    : '✖ Impedimento Reportado'}
-                                            </Text>
-                                        )}
-                                    </View>
-                                )}
-                            </View>
-                        ))}
+                            )
+                        })}
                     </ScrollView>
 
-                    {/* Barra Inferior de Envío de Consigna / Mensaje */}
+                    {/* COMPOSITOR PÚBLICO / PRIVADO */}
                     <View
                         style={[
-                            styles.composerBar,
-                            { backgroundColor: bgCard, borderTopColor: borderCol },
+                            styles.composerContainer,
+                            {
+                                backgroundColor: bgCard,
+                                borderTopColor: borderCol,
+                                paddingBottom: Math.max(insets.bottom, 8),
+                            },
                         ]}
                     >
-                        {isJefaturaOrAbove && (
+                        <View style={styles.visToggleRow}>
                             <TouchableOpacity
-                                onPress={() => setIsTaskFlag(!isTaskFlag)}
+                                onPress={() => setVisibility('PUBLIC')}
                                 style={[
-                                    styles.taskToggleBtn,
+                                    styles.visBtn,
                                     {
-                                        backgroundColor: isTaskFlag ? '#F59E0B' : '#E2E8F040',
+                                        backgroundColor: visibility === 'PUBLIC' ? '#10B981' : bgInput,
+                                        borderColor: visibility === 'PUBLIC' ? '#059669' : borderCol,
                                     },
                                 ]}
                             >
+                                <Globe size={12} color={visibility === 'PUBLIC' ? '#022C22' : textSecondary} />
                                 <Text
                                     style={{
                                         fontSize: 10,
                                         fontWeight: '900',
-                                        color: isTaskFlag ? '#0F172A' : textSecondary,
+                                        color: visibility === 'PUBLIC' ? '#022C22' : textSecondary,
                                     }}
                                 >
-                                    {isTaskFlag ? '📌 TAREA' : 'Nota'}
+                                    Público
                                 </Text>
                             </TouchableOpacity>
+
+                            <TouchableOpacity
+                                onPress={() => setVisibility('PRIVATE')}
+                                style={[
+                                    styles.visBtn,
+                                    {
+                                        backgroundColor: visibility === 'PRIVATE' ? '#6366F1' : bgInput,
+                                        borderColor: visibility === 'PRIVATE' ? '#4F46E5' : borderCol,
+                                    },
+                                ]}
+                            >
+                                <Lock size={12} color={visibility === 'PRIVATE' ? '#FFFFFF' : textSecondary} />
+                                <Text
+                                    style={{
+                                        fontSize: 10,
+                                        fontWeight: '900',
+                                        color: visibility === 'PRIVATE' ? '#FFFFFF' : textSecondary,
+                                    }}
+                                >
+                                    Privado
+                                </Text>
+                            </TouchableOpacity>
+
+                            {(isJefaturaOrAbove || visibility === 'PRIVATE') && (
+                                <TouchableOpacity
+                                    onPress={() => setIsTaskFlag(!isTaskFlag)}
+                                    style={[
+                                        styles.visBtn,
+                                        {
+                                            backgroundColor: isTaskFlag ? '#F59E0B' : bgInput,
+                                            borderColor: isTaskFlag ? '#D97706' : borderCol,
+                                        },
+                                    ]}
+                                >
+                                    <Text
+                                        style={{
+                                            fontSize: 10,
+                                            fontWeight: '900',
+                                            color: isTaskFlag ? '#0F172A' : textSecondary,
+                                        }}
+                                    >
+                                        {isTaskFlag ? '📌 TAREA' : '+ Hacer Tarea'}
+                                    </Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
+
+                        {visibility === 'PRIVATE' && usersList.length > 0 && (
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 6 }}>
+                                {usersList.map((u) => {
+                                    const active = u.id === recipientId
+                                    return (
+                                        <TouchableOpacity
+                                            key={u.id}
+                                            onPress={() => setRecipientId(u.id)}
+                                            style={[
+                                                styles.recipientChip,
+                                                {
+                                                    backgroundColor: active ? '#6366F1' : bgInput,
+                                                    borderColor: active ? '#4F46E5' : borderCol,
+                                                },
+                                            ]}
+                                        >
+                                            <Text
+                                                style={{
+                                                    fontSize: 10,
+                                                    fontWeight: '800',
+                                                    color: active ? '#FFFFFF' : textPrimary,
+                                                }}
+                                            >
+                                                Para: {u.full_name || u.email} ({u.role})
+                                            </Text>
+                                        </TouchableOpacity>
+                                    )
+                                })}
+                            </ScrollView>
                         )}
 
-                        <TextInput
-                            value={newMsgText}
-                            onChangeText={setNewMsgText}
-                            placeholder="Escribe consigna o reporte de turno..."
-                            placeholderTextColor="#64748B"
-                            style={[
-                                styles.composerInput,
-                                {
-                                    backgroundColor: bgInput,
-                                    borderColor: '#D97706',
-                                    color: textPrimary,
-                                },
-                            ]}
-                        />
+                        <View style={styles.composerBar}>
+                            <TextInput
+                                value={newMsgText}
+                                onChangeText={setNewMsgText}
+                                placeholder={
+                                    visibility === 'PRIVATE'
+                                        ? 'Escribe mensaje o tarea privada...'
+                                        : 'Escribe consigna o reporte público de turno...'
+                                }
+                                placeholderTextColor="#64748B"
+                                style={[
+                                    styles.composerInput,
+                                    {
+                                        backgroundColor: bgInput,
+                                        borderColor: visibility === 'PRIVATE' ? '#6366F1' : '#D97706',
+                                        color: textPrimary,
+                                    },
+                                ]}
+                            />
 
-                        <TouchableOpacity onPress={handleSendMessage} style={styles.sendBtn}>
-                            <Send size={18} color="#0F172A" />
-                        </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={handleSendMessage}
+                                style={[
+                                    styles.sendBtn,
+                                    visibility === 'PRIVATE' && { backgroundColor: '#6366F1' },
+                                ]}
+                            >
+                                <Send size={18} color={visibility === 'PRIVATE' ? '#FFFFFF' : '#0F172A'} />
+                            </TouchableOpacity>
+                        </View>
                     </View>
-                </View>
+                </KeyboardAvoidingView>
             ) : (
                 <ScrollView
-                    style={styles.scroll}
-                    contentContainerStyle={{ paddingBottom: 36 }}
+                    style={[styles.scroll, { paddingHorizontal: horizontalPadding }]}
+                    contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 24, 36) }}
                     showsVerticalScrollIndicator={false}
                 >
-                    {/* FORMULARIO PARA QUE EL SUPERVISOR REPORTE ACCIDENTES, ACTOS INSEGUROS O PERSONAL PROBLEMÁTICO */}
                     <View
                         style={[
                             styles.secFormCard,
@@ -391,10 +691,8 @@ export default function MobileTasksAndSecurityScreen() {
                                     style={[
                                         styles.typeChip,
                                         {
-                                            backgroundColor:
-                                                incTipo === t.id ? '#F43F5E' : bgInput,
-                                            borderColor:
-                                                incTipo === t.id ? '#E11D48' : borderCol,
+                                            backgroundColor: incTipo === t.id ? '#F43F5E' : bgInput,
+                                            borderColor: incTipo === t.id ? '#E11D48' : borderCol,
                                         },
                                     ]}
                                 >
@@ -452,7 +750,6 @@ export default function MobileTasksAndSecurityScreen() {
                         </TouchableOpacity>
                     </View>
 
-                    {/* HISTORIAL DE EVENTOS DE SEGURIDAD Y DISCIPLINA */}
                     {incidents.map((inc) => (
                         <View
                             key={inc.id}
@@ -501,10 +798,16 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '900',
     },
+    filterChip: {
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 10,
+        borderWidth: 1,
+        marginRight: 6,
+    },
     scroll: {
         flex: 1,
-        paddingHorizontal: 14,
-        paddingTop: 12,
+        paddingTop: 10,
     },
     msgCard: {
         borderRadius: 16,
@@ -516,6 +819,8 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: 6,
         marginBottom: 6,
     },
     msgAuthor: {
@@ -569,17 +874,37 @@ const styles = StyleSheet.create({
         fontSize: 11,
         fontWeight: '900',
     },
+    composerContainer: {
+        paddingHorizontal: 10,
+        paddingTop: 8,
+        borderTopWidth: 1,
+    },
+    visToggleRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6,
+        marginBottom: 6,
+    },
+    visBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 9,
+        paddingVertical: 5,
+        borderRadius: 8,
+        borderWidth: 1,
+    },
+    recipientChip: {
+        paddingHorizontal: 9,
+        paddingVertical: 5,
+        borderRadius: 8,
+        borderWidth: 1,
+        marginRight: 6,
+    },
     composerBar: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 10,
-        borderTopWidth: 1,
         gap: 8,
-    },
-    taskToggleBtn: {
-        paddingHorizontal: 10,
-        paddingVertical: 10,
-        borderRadius: 10,
     },
     composerInput: {
         flex: 1,

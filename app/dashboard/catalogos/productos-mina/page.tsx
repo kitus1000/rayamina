@@ -218,7 +218,7 @@ export default function ProductsMinaPage() {
     }
 
     return (
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
+        <div className="w-full max-w-6xl mx-auto px-2 sm:px-4 pt-4 md:pt-6 pb-16 min-w-0">
             {/* --- HEADER --- */}
             <div className="mb-6">
                 <Link href="/dashboard/catalogos" className="text-sm text-slate-400 hover:text-white flex items-center gap-1 transition-colors w-fit">
@@ -226,7 +226,7 @@ export default function ProductsMinaPage() {
                 </Link>
             </div>
 
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-white">Catálogo de Productos de Mina</h1>
                     <p className="text-slate-400">Configuración de actividades, variables de captura y operación.</p>
@@ -240,7 +240,7 @@ export default function ProductsMinaPage() {
             </div>
 
             {/* --- TABS --- */}
-            <div className="flex gap-2 mb-6 border-b border-slate-800">
+            <div className="flex gap-2 mb-6 border-b border-slate-800 overflow-x-auto whitespace-nowrap">
                 {TABS.map(tab => (
                     <button
                         key={tab.id}

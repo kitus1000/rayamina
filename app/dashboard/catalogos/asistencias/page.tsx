@@ -140,7 +140,7 @@ export default function AsistenciasCatalog() {
     )
 
     return (
-        <div className="p-6 max-w-7xl mx-auto space-y-6">
+        <div className="p-2 sm:p-4 max-w-full w-full min-w-0 mx-auto space-y-6">
             {/* Header Módulo */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-900/50 p-6 rounded-2xl border border-slate-800 backdrop-blur-xl">
                 <div>

@@ -203,7 +203,7 @@ export default function UsuariosConfiguracionPage() {
         )
 
     return (
-        <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-8">
+        <div className="p-2 sm:p-4 max-w-full w-full min-w-0 mx-auto space-y-8">
             {/* Cabecera */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>

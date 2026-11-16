@@ -8,8 +8,11 @@ import {
     Modal,
     TextInput,
     Alert,
+    KeyboardAvoidingView,
+    Platform,
     StyleSheet,
 } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
     Calendar,
     Plus,
@@ -22,10 +25,13 @@ import {
 } from 'lucide-react-native'
 import { supabase } from '../../lib/supabase'
 import { useMobileAuth } from '../../lib/auth-context'
+import { useResponsiveLayout } from '../../lib/responsive'
 import MobileShell from '../../components/MobileShell'
 
 export default function MobilePlanningScreen() {
     const { sysRole, theme, canEditPlanning } = useMobileAuth()
+    const insets = useSafeAreaInsets()
+    const { height: screenHeight, isCompact, isTablet, modalMaxWidth } = useResponsiveLayout()
     const [loading, setLoading] = useState(true)
     const [planInfo, setPlanInfo] = useState<any | null>(null)
     const [comparisonRows, setComparisonRows] = useState<any[]>([])
@@ -182,8 +188,8 @@ export default function MobilePlanningScreen() {
             pillarHex="#3B82F6"
         >
             <ScrollView
-                style={styles.scroll}
-                contentContainerStyle={{ paddingBottom: 36 }}
+                style={[styles.scroll, { paddingHorizontal: isCompact ? 10 : 14 }]}
+                contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 20, 36) }}
                 showsVerticalScrollIndicator={false}
             >
                 {/* CABECERA DE REGLA JERÁRQUICA DE PLANEACIÓN */}
@@ -196,12 +202,12 @@ export default function MobilePlanningScreen() {
                         },
                     ]}
                 >
-                    <View style={styles.headerTopRow}>
-                        <View style={{ flex: 1 }}>
+                    <View style={[styles.headerTopRow, { flexWrap: 'wrap', gap: 8 }]}>
+                        <View style={{ flex: 1, minWidth: 160 }}>
                             <Text style={[styles.planBadge, { color: '#2563EB' }]}>
                                 📐 SIMULACIÓN SEMANA 38 (21 AL 27 SEPTIEMBRE 2026)
                             </Text>
-                            <Text style={[styles.planTitle, { color: textPrimary }]}>
+                            <Text style={[styles.planTitle, { color: textPrimary, fontSize: isCompact ? 14 : 16 }]}>
                                 {planInfo?.nombre || 'Plan Maestro Semana 38'}
                             </Text>
                         </View>
@@ -311,13 +317,25 @@ export default function MobilePlanningScreen() {
 
             {/* MODAL PARA AGREGAR META PROYECTADA (SOLO PLANEADOR / JEFATURA) */}
             <Modal visible={modalOpen} animationType="slide" transparent>
-                <View style={styles.modalOverlay}>
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    style={styles.modalOverlay}
+                >
                     <View
                         style={[
                             styles.modalCard,
-                            { backgroundColor: bgCard, borderColor: borderCol },
+                            {
+                                backgroundColor: bgCard,
+                                borderColor: borderCol,
+                                maxHeight: screenHeight * 0.85,
+                                maxWidth: isTablet ? modalMaxWidth : '100%',
+                                width: '100%',
+                                alignSelf: 'center',
+                                paddingBottom: Math.max(insets.bottom + 14, 24),
+                            },
                         ]}
                     >
+                        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                         <View style={styles.modalHeader}>
                             <Text style={[styles.modalTitle, { color: textPrimary }]}>
                                 Agregar Meta a Semana 38
@@ -421,8 +439,9 @@ export default function MobilePlanningScreen() {
                                 <Text style={styles.saveBtnText}>GUARDAR META EN SUPABASE</Text>
                             )}
                         </TouchableOpacity>
+                        </ScrollView>
                     </View>
-                </View>
+                </KeyboardAvoidingView>
             </Modal>
         </MobileShell>
     )

@@ -785,7 +785,7 @@ function ReportesDiariosContent() {
 
                         {/* EMPAQUETAR WIDGET */}
                         {!isReadOnly && viewMode === 'ACTIVOS' && (
-                            <div className="bg-emerald-950/20 border-2 border-emerald-500/40 p-4 rounded-2xl flex flex-col md:flex-row items-center gap-5 shadow-lg min-w-full lg:min-w-[440px]">
+                            <div className="bg-emerald-950/20 border-2 border-emerald-500/40 p-4 rounded-2xl flex flex-col md:flex-row items-center gap-4 shadow-lg w-full lg:w-auto lg:min-w-[360px] shrink-0">
                                 <div className="flex items-center gap-3">
                                     <div className="w-11 h-11 bg-emerald-500/20 rounded-xl flex items-center justify-center text-emerald-500 border border-emerald-500/40">
                                         <Package size={22} />

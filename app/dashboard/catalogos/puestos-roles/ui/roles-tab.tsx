@@ -101,7 +101,8 @@ export default function RolesTab() {
                 <div className="text-slate-500">Cargando roles...</div>
             ) : (
                 <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-                    <table className="w-full text-left text-sm text-slate-400">
+                    <div className="overflow-x-auto">
+                        <table className="w-full min-w-[640px] text-left text-sm text-slate-400">
                         <thead className="bg-slate-950 text-slate-200 font-semibold">
                             <tr>
                                 <th className="px-6 py-3">Nombre Rol</th>
@@ -149,6 +150,7 @@ export default function RolesTab() {
                             )}
                         </tbody>
                     </table>
+                    </div>
                 </div>
             )}
 
